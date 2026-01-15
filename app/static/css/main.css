@@ -1,0 +1,12 @@
+a {
+    color: #202f4b;
+}
+a:hover {
+    color: #3b82f6;
+}
+nav ul {
+    display: inline-flex;
+}
+nav li {
+    margin: 5px
+}

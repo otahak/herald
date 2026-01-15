@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+{% block title %}Herald - Game Lobby{% endblock %}
+
+{% block head %}
+<script src="/static/js/store/gameStore.js"></script>
+<style>
+/* Mobile-friendly touch targets */
+@media (pointer: coarse) {
+    .color-picker label div {
+        min-width: 2.5rem;
+        min-height: 2.5rem;
+    }
+}
+
+/* Make inputs full width on mobile */
+@media (max-width: 640px) {
+    .input, .select {
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="game-lobby" class="container mx-auto px-4 py-8 max-w-2xl">
+    
+    <!-- Header -->
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold mb-2">Herald</h1>
+        <p class="text-base-content/70">Grimdark Future Digital Scoreboard</p>
+    </div>
+    
+    <!-- Error Alert -->
+    <div v-if="error" class="alert alert-error mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>[[ error ]]</span>
+        <button class="btn btn-sm btn-ghost" @click="error = null">✕</button>
+    </div>
+    
+    <!-- Tab Selection -->
+    <div class="tabs tabs-boxed justify-center mb-6">
+        <a class="tab" :class="{ 'tab-active': mode === 'create' }" @click="mode = 'create'">
+            Create Game
+        </a>
+        <a class="tab" :class="{ 'tab-active': mode === 'join' }" @click="mode = 'join'">
+            Join Game
+        </a>
+    </div>
+    
+    <!-- Create Game Form -->
+    <div v-if="mode === 'create'" class="card bg-base-200 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title">Create New Game</h2>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Game Name</span>
+                </label>
+                <input 
+                    type="text" 
+                    v-model="createForm.gameName"
+                    placeholder="My Game"
+                    class="input input-bordered"
+                />
+            </div>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Game System</span>
+                </label>
+                <select v-model="createForm.gameSystem" class="select select-bordered">
+                    <option value="gff">Grimdark Future: Firefight (Skirmish)</option>
+                    <option value="gf">Grimdark Future (Army Scale)</option>
+                </select>
+            </div>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Your Name</span>
+                </label>
+                <input 
+                    type="text" 
+                    v-model="createForm.playerName"
+                    placeholder="Player 1"
+                    class="input input-bordered"
+                    required
+                />
+            </div>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Your Color</span>
+                </label>
+                <div class="color-picker flex flex-wrap gap-2">
+                    <label 
+                        v-for="color in colors" 
+                        :key="color.value"
+                        class="cursor-pointer"
+                    >
+                        <input 
+                            type="radio" 
+                            v-model="createForm.playerColor" 
+                            :value="color.value"
+                            class="hidden"
+                        />
+                        <div 
+                            class="w-10 h-10 rounded-full border-2 transition-all"
+                            :style="{ backgroundColor: color.value }"
+                            :class="createForm.playerColor === color.value ? 'border-white scale-110' : 'border-transparent'"
+                        ></div>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="card-actions justify-end mt-4">
+                <button 
+                    class="btn btn-primary btn-block sm:btn-wide sm:btn-auto"
+                    :class="{ 'loading': isLoading }"
+                    :disabled="isLoading || !createForm.playerName"
+                    @click="createGame"
+                >
+                    Create Game
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Join Game Form -->
+    <div v-if="mode === 'join'" class="card bg-base-200 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title">Join Existing Game</h2>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Game Code</span>
+                </label>
+                <input 
+                    type="text" 
+                    v-model="joinForm.gameCode"
+                    placeholder="ABC123"
+                    class="input input-bordered uppercase"
+                    maxlength="6"
+                />
+            </div>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Your Name</span>
+                </label>
+                <input 
+                    type="text" 
+                    v-model="joinForm.playerName"
+                    placeholder="Player 2"
+                    class="input input-bordered"
+                    required
+                />
+            </div>
+            
+            <div class="form-control">
+                <label class="label">
+                    <span class="label-text">Your Color</span>
+                </label>
+                <div class="color-picker flex flex-wrap gap-2">
+                    <label 
+                        v-for="color in colors" 
+                        :key="color.value"
+                        class="cursor-pointer"
+                    >
+                        <input 
+                            type="radio" 
+                            v-model="joinForm.playerColor" 
+                            :value="color.value"
+                            class="hidden"
+                        />
+                        <div 
+                            class="w-10 h-10 rounded-full border-2 transition-all"
+                            :style="{ backgroundColor: color.value }"
+                            :class="joinForm.playerColor === color.value ? 'border-white scale-110' : 'border-transparent'"
+                        ></div>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="card-actions justify-end mt-4">
+                <button 
+                    class="btn btn-primary btn-block sm:btn-wide sm:btn-auto"
+                    :class="{ 'loading': isLoading }"
+                    :disabled="isLoading || !joinForm.gameCode || !joinForm.playerName"
+                    @click="joinGame"
+                >
+                    Join Game
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Game Created Modal -->
+    <dialog :open="showCodeModal" class="modal">
+        <div class="modal-box text-center">
+            <h3 class="font-bold text-lg mb-4">Game Created!</h3>
+            <p class="mb-2">Share this code with your opponent:</p>
+            <div class="text-4xl font-mono font-bold tracking-widest text-primary my-4">
+                [[ gameCode ]]
+            </div>
+            <p class="text-sm text-base-content/70 mb-4">
+                They can join at <span class="font-mono">/game</span>
+            </p>
+            
+            <!-- Waiting indicator -->
+            <div v-if="!opponentJoined" class="flex items-center justify-center gap-2 my-4 text-warning">
+                <span class="loading loading-dots loading-sm"></span>
+                <span>Waiting for opponent...</span>
+            </div>
+            
+            <!-- Opponent joined notification -->
+            <div v-else class="alert alert-success my-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span>[[ opponentName ]] has joined!</span>
+            </div>
+            
+            <div class="modal-action justify-center">
+                <button class="btn btn-primary" @click="goToGame">
+                    [[ opponentJoined ? 'Start Game' : 'Continue to Game' ]]
+                </button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="showCodeModal = false">close</button>
+        </form>
+    </dialog>
+    
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const { createApp } = Vue;
+    
+    const LobbyApp = {
+        data() {
+            return {
+                mode: 'create',
+                isLoading: false,
+                error: null,
+                showCodeModal: false,
+                gameCode: '',
+                
+                createForm: {
+                    gameName: '',
+                    gameSystem: 'gff',
+                    playerName: '',
+                    playerColor: '#3b82f6',
+                },
+                
+                joinForm: {
+                    gameCode: '',
+                    playerName: '',
+                    playerColor: '#ef4444',
+                },
+                
+                colors: [
+                    { name: 'Blue', value: '#3b82f6' },
+                    { name: 'Red', value: '#ef4444' },
+                    { name: 'Green', value: '#22c55e' },
+                    { name: 'Purple', value: '#a855f7' },
+                    { name: 'Orange', value: '#f97316' },
+                    { name: 'Cyan', value: '#06b6d4' },
+                ],
+            };
+        },
+        
+        computed: {
+            // Check if opponent has joined (more than 1 player in game)
+            opponentJoined() {
+                return GameStore.state.players.length > 1;
+            },
+            
+            // Get opponent's name
+            opponentName() {
+                const opponent = GameStore.state.players.find(p => p.id !== GameStore.state.currentPlayerId);
+                return opponent?.name || 'Opponent';
+            },
+        },
+        
+        methods: {
+            async createGame() {
+                this.isLoading = true;
+                this.error = null;
+                
+                try {
+                    const code = await GameStore.actions.createGame(
+                        this.createForm.gameName || 'New Game',
+                        this.createForm.gameSystem,
+                        this.createForm.playerName,
+                        this.createForm.playerColor
+                    );
+                    
+                    this.gameCode = code;
+                    this.showCodeModal = true;
+                    
+                    // Save player identity to localStorage (persistent)
+                    GameStore.actions.savePlayerIdentity(
+                        code, 
+                        GameStore.state.currentPlayerId,
+                        this.createForm.playerName
+                    );
+                    
+                    // Also store in sessionStorage for backwards compatibility
+                    sessionStorage.setItem('herald_player_id', GameStore.state.currentPlayerId);
+                    sessionStorage.setItem('herald_game_code', code);
+                    
+                    // Connect WebSocket to listen for opponent joining
+                    GameStore.actions.connectWebSocket(code);
+                    
+                } catch (error) {
+                    this.error = error.message;
+                } finally {
+                    this.isLoading = false;
+                }
+            },
+            
+            async joinGame() {
+                this.isLoading = true;
+                this.error = null;
+                
+                try {
+                    const game = await GameStore.actions.joinGame(
+                        this.joinForm.gameCode.toUpperCase(),
+                        this.joinForm.playerName,
+                        this.joinForm.playerColor
+                    );
+                    
+                    // Save player identity to localStorage (persistent)
+                    GameStore.actions.savePlayerIdentity(
+                        this.joinForm.gameCode.toUpperCase(),
+                        GameStore.state.currentPlayerId,
+                        this.joinForm.playerName
+                    );
+                    
+                    // Also store in sessionStorage for backwards compatibility
+                    sessionStorage.setItem('herald_player_id', GameStore.state.currentPlayerId);
+                    sessionStorage.setItem('herald_game_code', this.joinForm.gameCode.toUpperCase());
+                    
+                    // Navigate to game with playerId hint to skip selection modal
+                    window.location.href = `/game/${this.joinForm.gameCode.toUpperCase()}?playerId=${game.your_player_id}`;
+                    
+                } catch (error) {
+                    this.error = error.message;
+                } finally {
+                    this.isLoading = false;
+                }
+            },
+            
+            goToGame() {
+                window.location.href = `/game/${this.gameCode}`;
+            },
+        },
+    };
+    
+    const app = createApp(LobbyApp);
+    app.config.compilerOptions.delimiters = ['[[', ']]'];
+    app.mount('#game-lobby');
+});
+</script>
+{% endblock %}

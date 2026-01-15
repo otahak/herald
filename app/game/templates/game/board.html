@@ -1,0 +1,1206 @@
+{% extends "base.html" %}
+{% block title %}Herald - Game{% endblock %}
+
+{% block head %}
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<script src="/static/js/store/gameStore.js"></script>
+<style>
+/* Custom styles for game board */
+.unit-card { transition: all 0.2s ease; }
+.unit-card.activated { opacity: 0.6; }
+.unit-card.shaken { border-color: #fbbf24 !important; }
+.unit-card.destroyed { opacity: 0.4; filter: grayscale(1); }
+
+.health-bar { transition: width 0.3s ease; }
+.objective-marker { transition: all 0.2s ease; cursor: pointer; }
+.objective-marker:hover { transform: scale(1.1); }
+
+.player-column { min-height: 200px; }
+
+/* Mobile-first responsive styles */
+@media (max-width: 768px) {
+    .game-layout {
+        flex-direction: column !important;
+    }
+    
+    .player-column {
+        border-right: none !important;
+        border-left: none !important;
+        border-bottom: 1px solid hsl(var(--b3));
+        max-height: 40vh;
+        overflow-y: auto;
+    }
+    
+    .center-panel {
+        width: 100% !important;
+        order: -1; /* Move center panel to top on mobile */
+        max-height: none;
+        flex: 0 0 auto !important;
+    }
+    
+    .center-panel .objectives-section {
+        padding: 0.5rem !important;
+    }
+    
+    .center-panel .game-log {
+        max-height: 150px;
+    }
+    
+    .objective-marker {
+        width: 2.5rem !important;
+        height: 2.5rem !important;
+        font-size: 0.875rem !important;
+    }
+    
+    .unit-card .card-body {
+        padding: 0.5rem !important;
+    }
+    
+    /* Make buttons more touch-friendly */
+    .btn-xs {
+        min-height: 2rem;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+    
+    /* Stack unit controls vertically */
+    .unit-controls {
+        flex-direction: column;
+    }
+    
+    /* Header adjustments */
+    .navbar {
+        padding: 0.5rem;
+    }
+    
+    .navbar .flex-none {
+        flex-wrap: wrap;
+        gap: 0.25rem !important;
+    }
+}
+
+/* Tablet adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .center-panel {
+        width: 16rem !important;
+    }
+}
+
+/* Touch-friendly controls */
+@media (pointer: coarse) {
+    .btn {
+        min-height: 2.5rem;
+    }
+    
+    .btn-xs {
+        min-height: 2rem;
+    }
+    
+    .btn-circle {
+        width: 2rem;
+        height: 2rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="game-board" class="min-h-screen bg-base-300">
+    
+    <!-- Loading State -->
+    <div v-if="isLoading" class="flex items-center justify-center min-h-screen">
+        <span class="loading loading-spinner loading-lg"></span>
+    </div>
+    
+    <!-- Error State -->
+    <div v-else-if="error" class="flex items-center justify-center min-h-screen">
+        <div class="alert alert-error max-w-md">
+            <span>[[ error ]]</span>
+            <a href="/" class="btn btn-sm">Back to Lobby</a>
+        </div>
+    </div>
+    
+    <!-- No Game State (shouldn't happen, but safety) -->
+    <div v-else-if="!game" class="flex items-center justify-center min-h-screen">
+        <div class="text-center">
+            <span class="loading loading-spinner loading-lg"></span>
+            <p class="mt-4 text-base-content/70">Loading game...</p>
+        </div>
+    </div>
+    
+    <!-- Game Board -->
+    <div v-else class="flex flex-col h-screen">
+        
+        <!-- Top Bar -->
+        <header class="navbar bg-base-100 shadow-lg px-4">
+            <div class="flex-1">
+                <span class="text-lg font-bold">[[ game.name ]]</span>
+                <span class="badge badge-outline ml-2">[[ game.code ]]</span>
+                <span class="badge ml-2" :class="statusBadgeClass">[[ game.status ]]</span>
+            </div>
+            <div class="flex-none gap-2">
+                <div class="badge badge-lg badge-primary">Round [[ game.current_round ]] / [[ game.max_rounds ]]</div>
+                <div v-if="isConnected" class="badge badge-success gap-1">
+                    <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+                    Live
+                </div>
+                <div v-else class="badge badge-error gap-1">Disconnected</div>
+            </div>
+        </header>
+        
+        <!-- Main Content -->
+        <main class="flex-1 overflow-hidden flex game-layout">
+            
+            <!-- Left Column (local player if present) -->
+            <div class="player-column flex-1 p-4 overflow-y-auto border-r border-base-200 md:border-r">
+                <div v-if="leftPlayer" class="mb-4">
+                    <!-- Player Header -->
+                    <div class="flex items-center gap-2 mb-2">
+                        <div 
+                            class="w-4 h-4 rounded-full"
+                            :style="{ backgroundColor: leftPlayer.color }"
+                        ></div>
+                        <h2 class="text-lg font-bold">[[ leftPlayer.name ]]</h2>
+                        <span v-if="!leftPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
+                        <span v-if="game.current_player_id === leftPlayer.id" class="badge badge-info badge-sm">Active</span>
+                    </div>
+                    
+                    <!-- Army Health Bar -->
+                    <div class="mb-4">
+                        <div class="flex justify-between text-sm mb-1">
+                            <span>Army Health</span>
+                            <span>[[ Math.round(getArmyHealth(leftPlayer.id) * 100) ]]%</span>
+                        </div>
+                        <div class="w-full bg-base-300 rounded-full h-2">
+                            <div 
+                                class="health-bar h-2 rounded-full"
+                                :class="getHealthBarClass(getArmyHealth(leftPlayer.id))"
+                                :style="{ width: (getArmyHealth(leftPlayer.id) * 100) + '%' }"
+                            ></div>
+                        </div>
+                        <div v-if="isMoraleThreshold(leftPlayer.id)" class="text-warning text-xs mt-1">
+                            ⚠️ Morale Threshold Reached
+                        </div>
+                    </div>
+                    
+                    <!-- Units -->
+                    <div class="space-y-2">
+                        <unit-card 
+                            v-for="unit in getPlayerUnits(leftPlayer.id)"
+                            :key="unit.id"
+                            :unit="unit"
+                            :is-mine="leftPlayer.id === currentPlayerId"
+                            @update="updateUnit"
+                        ></unit-card>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Center Panel (Objectives, Turn Controls, Log) -->
+            <div class="center-panel w-80 bg-base-200 flex flex-col">
+                
+                <!-- Objectives -->
+                <div class="objectives-section p-4 border-b border-base-300">
+                    <h3 class="font-bold mb-2">Objectives</h3>
+                    <div class="flex flex-wrap gap-2 justify-center">
+                        <div 
+                            v-for="obj in objectives"
+                            :key="obj.id"
+                            class="objective-marker w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold border-2"
+                            :class="getObjectiveClass(obj)"
+                            :style="getObjectiveStyle(obj)"
+                            @click="cycleObjective(obj)"
+                        >
+                            [[ obj.marker_number ]]
+                        </div>
+                    </div>
+                    <div class="flex justify-around mt-2 text-sm">
+                        <div v-if="leftPlayer">
+                            <span :style="{ color: leftPlayer.color }">[[ leftPlayer.name ]]:</span>
+                            <span class="font-bold">[[ getPlayerVP(leftPlayer.id) ]] VP</span>
+                        </div>
+                        <div v-if="rightPlayer">
+                            <span :style="{ color: rightPlayer.color }">[[ rightPlayer.name ]]:</span>
+                            <span class="font-bold">[[ getPlayerVP(rightPlayer.id) ]] VP</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Turn Controls -->
+                <div class="p-4 border-b border-base-300" v-if="game.status === 'in_progress'">
+                    <h3 class="font-bold mb-2">Turn Controls</h3>
+                    <div class="space-y-2">
+                        <button 
+                            class="btn btn-sm btn-block"
+                            :disabled="game.current_round >= game.max_rounds"
+                            @click="advanceRound"
+                        >
+                            End Round → Round [[ game.current_round + 1 ]]
+                        </button>
+                        <button 
+                            v-if="game.current_round >= game.max_rounds"
+                            class="btn btn-sm btn-block btn-warning"
+                            @click="endGame"
+                        >
+                            End Game
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Lobby Controls (before game starts) -->
+                <div class="p-4 border-b border-base-300" v-if="game.status === 'lobby'">
+                    <h3 class="font-bold mb-2">Game Setup</h3>
+                    
+                    <!-- Army Import -->
+                    <div class="form-control mb-2">
+                        <label class="label label-text">Army Forge URL</label>
+                        <input 
+                            type="text" 
+                            v-model="armyForgeUrl"
+                            placeholder="Paste share link..."
+                            class="input input-sm input-bordered"
+                        />
+                    </div>
+                    <button 
+                        class="btn btn-sm btn-block mb-2"
+                        :disabled="!armyForgeUrl || isImporting"
+                        :class="{ 'loading': isImporting }"
+                        @click="importArmy"
+                    >
+                        Import Army
+                    </button>
+                    
+                    <div class="divider text-xs">or</div>
+                    
+                    <button 
+                        class="btn btn-sm btn-block btn-primary"
+                        :disabled="players.length < 2 || !hasUnits"
+                        @click="startGame"
+                    >
+                        Start Game
+                    </button>
+                    <p v-if="players.length < 2" class="text-xs text-center mt-1 text-warning">
+                        Waiting for opponent...
+                    </p>
+                    <p v-else-if="!hasUnits" class="text-xs text-center mt-1 text-warning">
+                        Both players need armies
+                    </p>
+                </div>
+                
+                <!-- Game Log -->
+                <div class="game-log flex-1 overflow-hidden flex flex-col">
+                    <div class="p-2 border-b border-base-300 flex justify-between items-center">
+                        <h3 class="font-bold text-sm">Game Log</h3>
+                        <button class="btn btn-xs btn-ghost" @click="fetchEvents">↻</button>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
+                        <div 
+                            v-for="event in events"
+                            :key="event.id"
+                            class="p-2 bg-base-300 rounded"
+                        >
+                            <div class="flex justify-between text-base-content/50">
+                                <span>R[[ event.round_number ]]</span>
+                                <span>[[ formatTime(event.created_at) ]]</span>
+                            </div>
+                            <div>[[ event.description ]]</div>
+                        </div>
+                        <div v-if="events.length === 0" class="text-center text-base-content/50 py-4">
+                            No events yet
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Column (opponent if present) -->
+            <div class="player-column flex-1 p-4 overflow-y-auto border-l border-base-200">
+                <div v-if="rightPlayer" class="mb-4">
+                    <!-- Player Header -->
+                    <div class="flex items-center gap-2 mb-2">
+                        <div 
+                            class="w-4 h-4 rounded-full"
+                            :style="{ backgroundColor: rightPlayer.color }"
+                        ></div>
+                        <h2 class="text-lg font-bold">[[ rightPlayer.name ]]</h2>
+                        <span v-if="!rightPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
+                        <span v-if="game.current_player_id === rightPlayer.id" class="badge badge-info badge-sm">Active</span>
+                    </div>
+                    
+                    <!-- Army Health Bar -->
+                    <div class="mb-4">
+                        <div class="flex justify-between text-sm mb-1">
+                            <span>Army Health</span>
+                            <span>[[ Math.round(getArmyHealth(rightPlayer.id) * 100) ]]%</span>
+                        </div>
+                        <div class="w-full bg-base-300 rounded-full h-2">
+                            <div 
+                                class="health-bar h-2 rounded-full"
+                                :class="getHealthBarClass(getArmyHealth(rightPlayer.id))"
+                                :style="{ width: (getArmyHealth(rightPlayer.id) * 100) + '%' }"
+                            ></div>
+                        </div>
+                        <div v-if="isMoraleThreshold(rightPlayer.id)" class="text-warning text-xs mt-1">
+                            ⚠️ Morale Threshold Reached
+                        </div>
+                    </div>
+                    
+                    <!-- Units -->
+                    <div class="space-y-2">
+                        <unit-card 
+                            v-for="unit in getPlayerUnits(rightPlayer.id)"
+                            :key="unit.id"
+                            :unit="unit"
+                            :is-mine="rightPlayer.id === currentPlayerId"
+                            @update="updateUnit"
+                        ></unit-card>
+                    </div>
+                </div>
+                <div v-else class="flex items-center justify-center h-full text-base-content/50">
+                    Waiting for opponent to join...
+                </div>
+            </div>
+            
+        </main>
+        
+    </div>
+    
+    <!-- Player Selection / Join Modal -->
+    <dialog v-if="showPlayerSelect && !currentPlayerId" :open="showPlayerSelect && !currentPlayerId" class="modal modal-open">
+        <div class="modal-box space-y-3">
+            <h3 class="font-bold text-lg">Join Game</h3>
+            <p class="text-base-content/70">
+                <span v-if="allowNewPlayer">Enter your name to join this game.</span>
+                <span v-else-if="availablePlayers.length">Select a player to rejoin.</span>
+                <span v-else>All player slots are currently active.</span>
+            </p>
+            
+            <!-- Select existing player -->
+            <div v-if="availablePlayers.length" class="space-y-2">
+                <button 
+                    v-for="player in availablePlayers" 
+                    :key="player.id"
+                    class="btn btn-block justify-start gap-3"
+                    @click="selectPlayer(player)"
+                >
+                    <div 
+                        class="w-6 h-6 rounded-full"
+                        :style="{ backgroundColor: player.color }"
+                    ></div>
+                    <span>[[ player.name ]]</span>
+                    <span v-if="player.is_host" class="badge badge-sm">Host</span>
+                    <span v-if="!player.is_connected" class="badge badge-ghost badge-sm">Disconnected</span>
+                </button>
+            </div>
+            
+            <!-- Create new player (only when a slot is empty) -->
+            <div v-else-if="allowNewPlayer" class="space-y-3">
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Name</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        class="input input-bordered w-full" 
+                        placeholder="Your name"
+                        v-model="newPlayerName"
+                    />
+                </div>
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Color</span>
+                    </label>
+                    <input 
+                        type="color" 
+                        class="input input-bordered w-24 h-12 p-1" 
+                        v-model="newPlayerColor"
+                    />
+                </div>
+                <div v-if="joinError" class="alert alert-error">
+                    [[ joinError ]]
+                </div>
+                <div class="flex gap-2">
+                    <button class="btn btn-primary flex-1" @click="createNewPlayer">Join Game</button>
+                    <a href="/" class="btn btn-outline">Cancel</a>
+                </div>
+            </div>
+            
+            <!-- No slots available -->
+            <div v-else class="space-y-3">
+                <div v-if="joinError" class="alert alert-error">[[ joinError ]]</div>
+                <p class="text-sm text-base-content/70">This game already has two active players.</p>
+                <a href="/" class="btn btn-outline btn-block">Return to Lobby</a>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50"></div>
+    </dialog>
+</div>
+
+<!-- Unit Card Component Template -->
+<template id="unit-card-template">
+    <div 
+        class="unit-card card card-compact bg-base-100 shadow"
+        :class="{
+            'activated': unit.state?.activated_this_round,
+            'shaken': unit.state?.is_shaken,
+            'destroyed': unit.state?.deployment_status === 'destroyed',
+            'border-2 border-warning': unit.state?.is_shaken,
+        }"
+    >
+        <div class="card-body p-3">
+            <!-- Header -->
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-sm">[[ unit.custom_name || unit.name ]]</span>
+                    <span class="badge badge-sm">[[ unit.size ]]</span>
+                    <span v-if="unit.is_hero" class="badge badge-sm badge-secondary">Hero</span>
+                    <span v-if="unit.is_caster" class="badge badge-sm badge-accent">Caster</span>
+                </div>
+                <span class="text-xs text-base-content/50">[[ unit.cost ]]pts</span>
+            </div>
+            
+            <!-- Stats Row -->
+            <div class="flex gap-4 text-xs">
+                <span><strong>Q</strong>[[ unit.quality ]]+</span>
+                <span><strong>D</strong>[[ unit.defense ]]+</span>
+                <span v-if="unit.tough > 1"><strong>T</strong>[[ unit.tough ]]</span>
+            </div>
+            
+            <!-- Status Badges -->
+            <div class="flex flex-wrap gap-1" v-if="unit.state">
+                <span v-if="unit.state.deployment_status === 'in_ambush'" class="badge badge-xs badge-info">Ambush</span>
+                <span v-if="unit.state.deployment_status === 'embarked'" class="badge badge-xs badge-info">
+                    Embarked
+                    <span v-if="transportName" class="ml-1">([[ transportName ]])</span>
+                </span>
+                <span v-if="unit.state.is_fatigued" class="badge badge-xs badge-warning">Fatigued</span>
+                <span v-if="unit.state.activated_this_round" class="badge badge-xs badge-neutral">Activated</span>
+            </div>
+            
+            <!-- Transport Info (for transports) -->
+            <div v-if="unit.is_transport" class="flex items-center gap-2 text-xs bg-base-200 rounded px-2 py-1">
+                <span class="font-bold">Transport:</span>
+                <span>[[ embarkedCount ]] / [[ unit.transport_capacity ]]</span>
+                <span v-if="embarkedUnits.length > 0" class="text-base-content/70">
+                    ([[ embarkedUnits.map(u => u.name).join(', ') ]])
+                </span>
+            </div>
+            
+            <!-- Controls (only for own units) -->
+            <div v-if="isMine && unit.state" class="unit-controls flex flex-wrap gap-2 mt-2">
+                
+                <!-- Wounds -->
+                <div class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
+                    <span class="text-xs">Wounds:</span>
+                    <button class="btn btn-xs btn-circle" @click="adjustWounds(-1)" :disabled="unit.state.wounds_taken <= 0">-</button>
+                    <span class="font-mono w-8 text-center">[[ unit.state.wounds_taken ]] / [[ maxWounds ]]</span>
+                    <button class="btn btn-xs btn-circle" @click="adjustWounds(1)" :disabled="unit.state.wounds_taken >= maxWounds">+</button>
+                </div>
+                
+                <!-- Spell Tokens (for Casters) -->
+                <div v-if="unit.is_caster" class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
+                    <span class="text-xs">Tokens:</span>
+                    <button class="btn btn-xs btn-circle" @click="adjustTokens(-1)" :disabled="unit.state.spell_tokens <= 0">-</button>
+                    <span class="font-mono w-8 text-center">[[ unit.state.spell_tokens ]] / 6</span>
+                    <button class="btn btn-xs btn-circle" @click="adjustTokens(1)" :disabled="unit.state.spell_tokens >= 6">+</button>
+                </div>
+                
+                <!-- Limited Weapons -->
+                <div v-if="limitedWeapons.length > 0" class="w-full">
+                    <div class="text-xs text-base-content/70 mb-1">Limited Weapons:</div>
+                    <div class="flex flex-wrap gap-1">
+                        <button 
+                            v-for="weapon in limitedWeapons"
+                            :key="weapon.name"
+                            class="btn btn-xs"
+                            :class="isWeaponUsed(weapon.name) ? 'btn-disabled line-through opacity-50' : 'btn-outline btn-accent'"
+                            @click="toggleLimitedWeapon(weapon.name)"
+                            :disabled="isWeaponUsed(weapon.name)"
+                        >
+                            [[ weapon.label || weapon.name ]]
+                            <span v-if="isWeaponUsed(weapon.name)" class="ml-1">✓</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Toggle Buttons -->
+                <div class="flex gap-1">
+                    <button 
+                        class="btn btn-xs"
+                        :class="unit.state.activated_this_round ? 'btn-neutral' : 'btn-outline'"
+                        @click="toggleActivated"
+                    >
+                        [[ unit.state.activated_this_round ? '✓ Activated' : 'Activate' ]]
+                    </button>
+                    <button 
+                        class="btn btn-xs"
+                        :class="unit.state.is_shaken ? 'btn-warning' : 'btn-outline'"
+                        @click="toggleShaken"
+                    >
+                        [[ unit.state.is_shaken ? '⚠ Shaken' : 'Shaken' ]]
+                    </button>
+                </div>
+                
+                <!-- Deploy from Ambush -->
+                <button 
+                    v-if="unit.state.deployment_status === 'in_ambush' && canDeploy"
+                    class="btn btn-xs btn-success"
+                    @click="deployUnit"
+                >
+                    Deploy from Ambush
+                </button>
+                
+                <!-- Transport Controls -->
+                <div v-if="availableTransports.length > 0 && unit.state.deployment_status === 'deployed' && !unit.is_transport" class="dropdown dropdown-top">
+                    <label tabindex="0" class="btn btn-xs btn-outline">Embark</label>
+                    <ul tabindex="0" class="dropdown-content z-10 menu p-2 shadow bg-base-100 rounded-box w-52">
+                        <li v-for="transport in availableTransports" :key="transport.id">
+                            <a @click="embarkUnit(transport.id)">
+                                [[ transport.name ]] ([[ getTransportSpace(transport) ]] free)
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                
+                <!-- Disembark -->
+                <button 
+                    v-if="unit.state.deployment_status === 'embarked'"
+                    class="btn btn-xs btn-info"
+                    @click="disembarkUnit"
+                >
+                    Disembark
+                </button>
+                
+                <!-- Destroy -->
+                <button 
+                    v-if="unit.state.deployment_status !== 'destroyed'"
+                    class="btn btn-xs btn-error btn-outline"
+                    @click="destroyUnit"
+                >
+                    Destroy
+                </button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue;
+    
+    const GAME_CODE = "{{ game_code }}";
+    
+    // Unit Card Component
+    const UnitCard = {
+        template: '#unit-card-template',
+        props: {
+            unit: { type: Object, required: true },
+            isMine: { type: Boolean, default: false },
+        },
+        emits: ['update'],
+        setup(props, { emit }) {
+            const store = GameStore;
+            
+            const maxWounds = computed(() => props.unit.size * props.unit.tough);
+            
+            const canDeploy = computed(() => {
+                return store.state.game?.current_round >= 2;
+            });
+            
+            // Transport-related computed properties
+            const embarkedUnits = computed(() => {
+                if (!props.unit.is_transport) return [];
+                return store.state.units.filter(u => u.state?.transport_id === props.unit.id);
+            });
+            
+            const embarkedCount = computed(() => {
+                return embarkedUnits.value.reduce((total, u) => total + u.size, 0);
+            });
+            
+            const transportName = computed(() => {
+                if (!props.unit.state?.transport_id) return null;
+                const transport = store.state.units.find(u => u.id === props.unit.state.transport_id);
+                return transport?.name || null;
+            });
+            
+            const availableTransports = computed(() => {
+                // Find transports belonging to the same player with available space
+                return store.state.units.filter(u => 
+                    u.is_transport && 
+                    u.player_id === props.unit.player_id &&
+                    u.state?.deployment_status === 'deployed' &&
+                    u.id !== props.unit.id &&
+                    getTransportSpace(u) >= props.unit.size
+                );
+            });
+            
+            const getTransportSpace = (transport) => {
+                const occupied = store.state.units
+                    .filter(u => u.state?.transport_id === transport.id)
+                    .reduce((total, u) => total + u.size, 0);
+                return transport.transport_capacity - occupied;
+            };
+            
+            const embarkUnit = (transportId) => {
+                emit('update', props.unit.id, { 
+                    deployment_status: 'embarked',
+                    transport_id: transportId 
+                });
+            };
+            
+            const disembarkUnit = () => {
+                emit('update', props.unit.id, { 
+                    deployment_status: 'deployed',
+                    transport_id: null 
+                });
+            };
+            
+            // Extract Limited weapons from loadout
+            const limitedWeapons = computed(() => {
+                if (!props.unit.loadout) return [];
+                
+                const weapons = [];
+                const processLoadout = (items) => {
+                    for (const item of items) {
+                        // Check if this is a weapon with Limited rule
+                        if (item.specialRules) {
+                            const hasLimited = item.specialRules.some(
+                                rule => rule.name?.toLowerCase() === 'limited'
+                            );
+                            if (hasLimited) {
+                                weapons.push({
+                                    name: item.name,
+                                    label: item.label || item.name,
+                                    count: item.count || 1,
+                                });
+                            }
+                        }
+                        // Check label for "Limited" text as backup
+                        if (item.label && item.label.toLowerCase().includes('limited')) {
+                            if (!weapons.find(w => w.name === item.name)) {
+                                weapons.push({
+                                    name: item.name,
+                                    label: item.label || item.name,
+                                    count: item.count || 1,
+                                });
+                            }
+                        }
+                        // Recurse into content if exists
+                        if (item.content && Array.isArray(item.content)) {
+                            processLoadout(item.content);
+                        }
+                    }
+                };
+                
+                processLoadout(props.unit.loadout);
+                return weapons;
+            });
+            
+            const isWeaponUsed = (weaponName) => {
+                const usedList = props.unit.state?.limited_weapons_used || [];
+                return usedList.includes(weaponName);
+            };
+            
+            const toggleLimitedWeapon = (weaponName) => {
+                const currentUsed = props.unit.state?.limited_weapons_used || [];
+                if (!currentUsed.includes(weaponName)) {
+                    // Mark as used
+                    emit('update', props.unit.id, { 
+                        limited_weapons_used: [...currentUsed, weaponName] 
+                    });
+                }
+                // Note: We don't allow un-using limited weapons (they're one-use per game)
+            };
+            
+            const adjustWounds = (delta) => {
+                const newWounds = Math.max(0, Math.min(maxWounds.value, props.unit.state.wounds_taken + delta));
+                emit('update', props.unit.id, { wounds_taken: newWounds });
+            };
+            
+            const adjustTokens = (delta) => {
+                const newTokens = Math.max(0, Math.min(6, props.unit.state.spell_tokens + delta));
+                emit('update', props.unit.id, { spell_tokens: newTokens });
+            };
+            
+            const toggleActivated = () => {
+                emit('update', props.unit.id, { activated_this_round: !props.unit.state.activated_this_round });
+            };
+            
+            const toggleShaken = () => {
+                emit('update', props.unit.id, { is_shaken: !props.unit.state.is_shaken });
+            };
+            
+            const deployUnit = () => {
+                emit('update', props.unit.id, { deployment_status: 'deployed' });
+            };
+            
+            const destroyUnit = () => {
+                if (confirm(`Destroy ${props.unit.name}?`)) {
+                    emit('update', props.unit.id, { deployment_status: 'destroyed' });
+                }
+            };
+            
+            return {
+                maxWounds,
+                canDeploy,
+                embarkedUnits,
+                embarkedCount,
+                transportName,
+                availableTransports,
+                getTransportSpace,
+                embarkUnit,
+                disembarkUnit,
+                limitedWeapons,
+                isWeaponUsed,
+                toggleLimitedWeapon,
+                adjustWounds,
+                adjustTokens,
+                toggleActivated,
+                toggleShaken,
+                deployUnit,
+                destroyUnit,
+            };
+        },
+    };
+    
+    // Main App
+    const GameBoardApp = {
+        components: { UnitCard },
+        setup() {
+            const store = GameStore;
+            
+            // Reactive refs to store state
+            const game = computed(() => store.state.game);
+            const players = computed(() => store.state.players);
+            const units = computed(() => store.state.units);
+            const objectives = computed(() => store.state.objectives);
+            const events = computed(() => store.state.events);
+            const isLoading = computed(() => store.state.isLoading);
+            const isConnected = computed(() => store.state.isConnected);
+            const error = computed(() => store.state.error);
+            const currentPlayerId = computed(() => store.state.currentPlayerId);
+            
+            // Order players so "me" is left
+            const leftPlayer = computed(() => {
+                return players.value.find(p => p.id === currentPlayerId.value) || players.value[0] || null;
+            });
+            const rightPlayer = computed(() => {
+                return players.value.find(p => p.id && leftPlayer.value && p.id !== leftPlayer.value.id) || players.value[1] || null;
+            });
+            
+            const armyForgeUrl = ref('');
+            const isImporting = ref(false);
+            
+            // Computed
+            const statusBadgeClass = computed(() => {
+                switch (game.value?.status) {
+                    case 'lobby': return 'badge-info';
+                    case 'in_progress': return 'badge-success';
+                    case 'completed': return 'badge-neutral';
+                    default: return '';
+                }
+            });
+            
+            const hasUnits = computed(() => {
+                return players.value.every(p => 
+                    units.value.some(u => u.player_id === p.id)
+                );
+            });
+            
+            // Methods
+            const getPlayerUnits = (playerId) => {
+                return units.value.filter(u => u.player_id === playerId);
+            };
+            
+            const getArmyHealth = (playerId) => {
+                const player = players.value.find(p => p.id === playerId);
+                if (!player || player.starting_unit_count === 0) return 1;
+                
+                const currentUnits = units.value.filter(u => 
+                    u.player_id === playerId && 
+                    u.state?.deployment_status !== 'destroyed'
+                ).length;
+                
+                return currentUnits / player.starting_unit_count;
+            };
+            
+            const isMoraleThreshold = (playerId) => {
+                return getArmyHealth(playerId) <= 0.5;
+            };
+            
+            const getHealthBarClass = (health) => {
+                if (health > 0.75) return 'bg-success';
+                if (health > 0.5) return 'bg-warning';
+                if (health > 0.25) return 'bg-orange-500';
+                return 'bg-error';
+            };
+            
+            const getPlayerVP = (playerId) => {
+                return objectives.value.filter(o => 
+                    o.status === 'seized' && o.controlled_by_id === playerId
+                ).length;
+            };
+            
+            const getObjectiveClass = (obj) => {
+                if (obj.status === 'contested') return 'border-dashed';
+                return '';
+            };
+            
+            const getObjectiveStyle = (obj) => {
+                if (obj.status === 'neutral') {
+                    return { backgroundColor: '#4b5563', borderColor: '#6b7280' };
+                }
+                if (obj.status === 'contested') {
+                    return { backgroundColor: '#fbbf24', borderColor: '#f59e0b' };
+                }
+                const player = players.value.find(p => p.id === obj.controlled_by_id);
+                return { 
+                    backgroundColor: player?.color || '#4b5563',
+                    borderColor: player?.color || '#6b7280',
+                };
+            };
+            
+            const cycleObjective = async (obj) => {
+                const states = ['neutral', 'seized', 'contested'];
+                const currentIndex = states.indexOf(obj.status);
+                const nextIndex = (currentIndex + 1) % states.length;
+                const nextStatus = states[nextIndex];
+                
+                // For seized, alternate between players
+                let controlledById = null;
+                if (nextStatus === 'seized') {
+                    // If was neutral or contested, give to current player
+                    // If was seized by other player, give to current player
+                    controlledById = currentPlayerId.value;
+                }
+                
+                await store.actions.updateObjective(obj.id, nextStatus, controlledById);
+            };
+            
+            const updateUnit = async (unitId, changes) => {
+                await store.actions.updateUnit(unitId, changes);
+            };
+            
+            const importArmy = async () => {
+                if (!armyForgeUrl.value) return;
+                
+                isImporting.value = true;
+                try {
+                    await store.actions.importArmy(GAME_CODE, armyForgeUrl.value);
+                    armyForgeUrl.value = '';
+                } catch (error) {
+                    alert('Failed to import: ' + error.message);
+                } finally {
+                    isImporting.value = false;
+                }
+            };
+            
+            const startGame = async () => {
+                await store.actions.startGame();
+            };
+            
+            const advanceRound = async () => {
+                if (confirm('End current round and advance to the next?')) {
+                    await store.actions.advanceRound();
+                }
+            };
+            
+            const endGame = async () => {
+                if (confirm('End the game? This cannot be undone.')) {
+                    const code = game.value?.code;
+                    await fetch(`/api/games/${code}/state`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: 'completed' }),
+                    });
+                    await store.actions.fetchGame(code);
+                }
+            };
+            
+            const fetchEvents = async () => {
+                await store.actions.fetchEvents();
+            };
+            
+            const formatTime = (timestamp) => {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            };
+            
+            // Player selection state
+            const showPlayerSelect = ref(false);
+            const availablePlayers = ref([]);
+            const allowNewPlayer = ref(false);
+            const newPlayerName = ref('');
+            const newPlayerColor = ref('#ef4444');
+            const joinError = ref('');
+            
+            const selectPlayer = async (player) => {
+                store.state.currentPlayerId = player.id;
+                store.actions.savePlayerIdentity(GAME_CODE, player.id, player.name);
+                showPlayerSelect.value = false;
+                
+                // Connect WebSocket with selected identity
+                store.actions.connectWebSocket(GAME_CODE);
+            };
+            
+            const createNewPlayer = async () => {
+                joinError.value = '';
+                const name = newPlayerName.value.trim();
+                if (!name) {
+                    joinError.value = 'Please enter a name.';
+                    return;
+                }
+                
+                try {
+                    const game = await store.actions.joinGame(
+                        GAME_CODE,
+                        name,
+                        newPlayerColor.value || '#ef4444',
+                    );
+                    
+                    // Persist identity
+                    store.actions.savePlayerIdentity(GAME_CODE, game.your_player_id, name);
+                    
+                    // Refresh game state to reflect new player
+                    await store.actions.fetchGame(GAME_CODE);
+                    await store.actions.fetchEvents();
+                    
+                    // Set identity and close modal
+                    store.state.currentPlayerId = game.your_player_id;
+                    showPlayerSelect.value = false;
+                    allowNewPlayer.value = false;
+                    availablePlayers.value = [];
+                    resetJoinState();
+                    
+                    // Connect WebSocket
+                    store.actions.connectWebSocket(GAME_CODE);
+                } catch (err) {
+                    joinError.value = err.message || 'Failed to join game.';
+                }
+            };
+            
+            const resetJoinState = () => {
+                joinError.value = '';
+                newPlayerName.value = '';
+                newPlayerColor.value = '#ef4444';
+                allowNewPlayer.value = false;
+            };
+            
+            // Lifecycle
+            onMounted(async () => {
+                const urlParams = new URLSearchParams(window.location.search);
+                const queryPlayerId = urlParams.get('playerId');
+                
+                // Fetch game state first
+                await store.actions.fetchGame(GAME_CODE);
+                await store.actions.fetchEvents();
+                
+                const playersList = (store.state.players || []).map(p => ({
+                    ...p,
+                    id: String(p.id),
+                }));
+                const connectedPlayers = playersList.filter(p => p.is_connected);
+                const disconnectedPlayers = playersList.filter(p => !p.is_connected);
+                const hasEmptySlot = playersList.length < 2;
+                const currentId = store.state.currentPlayerId ? String(store.state.currentPlayerId) : null;
+                
+                // If we already have a current player in state and it exists, just connect
+                if (currentId) {
+                    const existing = playersList.find(p => p.id === currentId);
+                    if (existing) {
+                        showPlayerSelect.value = false;
+                        allowNewPlayer.value = false;
+                        store.state.currentPlayerId = existing.id;
+                        store.actions.savePlayerIdentity(GAME_CODE, existing.id, existing.name);
+                        store.actions.connectWebSocket(GAME_CODE);
+                        return;
+                    } else {
+                        store.state.currentPlayerId = null;
+                    }
+                }
+                
+                // If playerId provided in URL and exists in game, use it (no prompt)
+                if (queryPlayerId) {
+                    const playerFromQuery = playersList.find(p => p.id === String(queryPlayerId));
+                    if (playerFromQuery) {
+                        store.state.currentPlayerId = queryPlayerId;
+                        store.actions.savePlayerIdentity(GAME_CODE, queryPlayerId, playerFromQuery.name);
+                        showPlayerSelect.value = false;
+                        store.actions.connectWebSocket(GAME_CODE);
+                        return;
+                    }
+                }
+                
+                // Try to restore player identity (localStorage)
+                if (!store.state.currentPlayerId) {
+                    const savedIdentity = store.actions.getSavedPlayerIdentity(GAME_CODE);
+                    if (savedIdentity) {
+                        const player = playersList.find(p => p.id === String(savedIdentity.playerId));
+                        if (player) {
+                            store.state.currentPlayerId = savedIdentity.playerId;
+                            console.log('Restored player identity:', player.name);
+                            store.actions.connectWebSocket(GAME_CODE);
+                            return;
+                        } else {
+                            store.actions.clearPlayerIdentity(GAME_CODE);
+                        }
+                    }
+                }
+                
+                // If no identity, try sessionStorage as fallback (only if player exists)
+                if (!store.state.currentPlayerId) {
+                    const sessionPlayerId = sessionStorage.getItem('herald_player_id');
+                    if (sessionPlayerId) {
+                        const player = playersList.find(p => p.id === String(sessionPlayerId));
+                        if (player) {
+                            store.state.currentPlayerId = sessionPlayerId;
+                            // Save to localStorage for future
+                            store.actions.savePlayerIdentity(GAME_CODE, sessionPlayerId, player.name);
+                            store.actions.connectWebSocket(GAME_CODE);
+                            return;
+                        }
+                    }
+                }
+                
+                // No identity yet: determine prompt based on slot availability/connection
+                resetJoinState();
+                
+                if (hasEmptySlot) {
+                    // Host-only present: prompt to create Player 2
+                    allowNewPlayer.value = true;
+                    availablePlayers.value = [];
+                    showPlayerSelect.value = true;
+                    return;
+                }
+                
+                if (connectedPlayers.length === 0) {
+                    // No active users: select from previous players
+                    allowNewPlayer.value = false;
+                    availablePlayers.value = playersList;
+                    showPlayerSelect.value = true;
+                    return;
+                }
+                
+                if (connectedPlayers.length === 1 && disconnectedPlayers.length >= 1) {
+                    // One active (likely host), other disconnected: select disconnected player
+                    allowNewPlayer.value = false;
+                    availablePlayers.value = disconnectedPlayers;
+                    showPlayerSelect.value = true;
+                    return;
+                }
+                
+                // If we somehow have an identity, allow proceeding even if both active
+                if (currentId && playersList.some(p => p.id === currentId)) {
+                    store.state.currentPlayerId = currentId;
+                    store.actions.savePlayerIdentity(
+                        GAME_CODE,
+                        currentId,
+                        playersList.find(p => p.id === currentId)?.name || 'Player'
+                    );
+                    showPlayerSelect.value = false;
+                    allowNewPlayer.value = false;
+                    joinError.value = '';
+                    store.actions.connectWebSocket(GAME_CODE);
+                    return;
+                }
+                
+                // Both players active or unexpected state: block new joins
+                allowNewPlayer.value = false;
+                availablePlayers.value = [];
+                showPlayerSelect.value = true;
+                joinError.value = 'All player slots are currently active.';
+            });
+            
+            // Hide modal automatically once identity is set and players are present
+            watch(
+                () => [currentPlayerId.value, players.value.length],
+                ([pid, count]) => {
+                    if (pid && count > 0) {
+                        showPlayerSelect.value = false;
+                        allowNewPlayer.value = false;
+                        joinError.value = '';
+                    }
+                }
+            );
+            
+            watch(
+                () => store.state.currentPlayerId,
+                (pid) => {
+                    if (pid) {
+                        showPlayerSelect.value = false;
+                        allowNewPlayer.value = false;
+                        joinError.value = '';
+                    }
+                }
+            );
+            
+            // Also hide if we get a full state where our player exists
+            watch(
+                () => players.value.map(p => String(p.id)),
+                () => {
+                    const pid = store.state.currentPlayerId ? String(store.state.currentPlayerId) : null;
+                    if (pid && players.value.some(p => String(p.id) === pid)) {
+                        showPlayerSelect.value = false;
+                        allowNewPlayer.value = false;
+                        joinError.value = '';
+                    }
+                }
+            );
+            
+            onUnmounted(() => {
+                store.actions.disconnectWebSocket();
+            });
+            
+            return {
+                // State
+                game,
+                players,
+                units,
+                objectives,
+                events,
+                isLoading,
+                isConnected,
+                error,
+                currentPlayerId,
+                leftPlayer,
+                rightPlayer,
+                armyForgeUrl,
+                isImporting,
+                showPlayerSelect,
+                availablePlayers,
+                allowNewPlayer,
+                newPlayerName,
+                newPlayerColor,
+                joinError,
+                
+                // Computed
+                statusBadgeClass,
+                hasUnits,
+                
+                // Methods
+                selectPlayer,
+                getPlayerUnits,
+                getArmyHealth,
+                isMoraleThreshold,
+                getHealthBarClass,
+                getPlayerVP,
+                getObjectiveClass,
+                getObjectiveStyle,
+                cycleObjective,
+                updateUnit,
+                importArmy,
+                startGame,
+                advanceRound,
+                endGame,
+                fetchEvents,
+                formatTime,
+                createNewPlayer,
+            };
+        },
+    };
+    
+    const app = createApp(GameBoardApp);
+    app.config.compilerOptions.delimiters = ['[[', ']]'];
+    app.mount('#game-board');
+});
+</script>
+{% endblock %}

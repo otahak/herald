@@ -1,0 +1,47 @@
+# Python / venv
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+ENV/
+
+# Node
+node_modules/
+
+# Coverage / test artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+playwright-report/
+test-results/
+
+# Playwright caches/traces (optional but recommended)
+playwright/.cache/
+playwright/.playwright-cache/
+playwright-*.zip
+
+# Logs
+*.log
+
+# Env
+.env
+.env.local
+.env.*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Optional build artifacts (keep if you start bundling)
+dist/
+build/
+
+# Keep this file tracked
+!.gitignore
