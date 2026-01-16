@@ -150,7 +150,7 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch(`${BASE_PATH}/api/games/${code}/join`, {
+                const response = await fetch(`/api/games/${code}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -220,7 +220,7 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch(`${BASE_PATH}/api/proxy/import-army/${code}`, {
+                const response = await fetch(`/api/proxy/import-army/${code}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -342,7 +342,7 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`${BASE_PATH}/api/games/${code}/start`, {
+                const response = await fetch(`/api/games/${code}/start`, {
                     method: 'POST',
                 });
                 
@@ -407,7 +407,7 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`${BASE_PATH}/api/games/${code}/events?limit=${limit}`);
+                const response = await fetch(`/api/games/${code}/events?limit=${limit}`);
                 
                 if (!response.ok) {
                     const error = await response.json();
