@@ -45,29 +45,16 @@ jobs:
             
             # Update dependencies
             echo "Updating dependencies..."
-            # The service uses .venv, so it should exist. Use pip to update dependencies.
-            # If .venv doesn't exist, we have a bigger problem, but try to handle it.
-            if [ -d "/opt/herald/.venv" ]; then
-              echo "Using existing virtual environment to update dependencies..."
-              su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/python -m pip install --upgrade pip setuptools wheel && /opt/herald/.venv/bin/pip install -e . --no-deps || /opt/herald/.venv/bin/pip install -e ."
+            # The service uses .venv/bin/uvicorn, so .venv should exist
+            # Just ensure pip is up to date and install the package
+            # Skip uv entirely - use pip directly from the venv
+            if [ -d "/opt/herald/.venv" ] && [ -f "/opt/herald/.venv/bin/pip" ]; then
+              echo "Updating dependencies using venv pip..."
+              su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/pip install --upgrade pip && /opt/herald/.venv/bin/pip install -e ."
             else
-              echo "WARNING: .venv not found. Attempting to find uv to recreate it..."
-              # Try to find uv as root
-              UV_CMD=""
-              for path in /usr/local/bin/uv /root/.cargo/bin/uv /home/herald/.cargo/bin/uv; do
-                if [ -x "$path" ] 2>/dev/null; then
-                  UV_CMD="$path"
-                  chmod +x "$path" 2>/dev/null || true
-                  break
-                fi
-              done
-              if [ -n "$UV_CMD" ]; then
-                echo "Found uv at: $UV_CMD, creating venv..."
-                su herald -s /bin/bash -c "cd /opt/herald && $UV_CMD sync --frozen --no-dev"
-              else
-                echo "ERROR: .venv doesn't exist and uv not found. Cannot proceed."
-                exit 1
-              fi
+              echo "ERROR: Virtual environment not found at /opt/herald/.venv"
+              echo "This should not happen - the service requires .venv to exist."
+              echo "Skipping dependency update - service may fail to start."
             fi
             
             # Run database migrations
