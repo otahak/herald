@@ -67,14 +67,18 @@ async def migrate():
         parts = DATABASE_URL.split("@")
         if len(parts) == 2:
             print(f"  Connection: {parts[0].split('//')[0]}//***@{parts[1]}")
+    
     try:
         engine = create_async_engine(DATABASE_URL, echo=True)
+        print("✓ Database engine created successfully")
     except Exception as e:
         print(f"ERROR: Failed to create database engine: {e}")
         print(f"  DATABASE_URL value: {repr(DATABASE_URL)}")
         raise
     
-    async with engine.begin() as conn:
+    print("Attempting to connect to database...")
+    try:
+        async with engine.begin() as conn:
         # Check if column already exists
         check_query = text("""
             SELECT column_name 
@@ -106,8 +110,13 @@ async def migrate():
             await conn.execute(index_query)
             
             print("Successfully added 'attached_to_unit_id' column to units table!")
-    
-    await engine.dispose()
+    except Exception as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        await engine.dispose()
 
 if __name__ == "__main__":
     asyncio.run(migrate())

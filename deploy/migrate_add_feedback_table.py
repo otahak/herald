@@ -83,6 +83,7 @@ async def main():
     print(f"Connecting to database...")
     try:
         engine = create_async_engine(database_url, echo=False)
+        print("✓ Database engine created successfully")
     except Exception as e:
         print(f"ERROR: Failed to create database engine: {e}")
         print(f"  DATABASE_URL value: {repr(database_url)}")
@@ -90,62 +91,69 @@ async def main():
     
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     
-    async with async_session() as session:
-        try:
-            # Check if feedback table already exists
-            check_stmt = text("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'feedback'
-                );
-            """)
-            result = await session.execute(check_stmt)
-            exists = result.scalar()
-            
-            if exists:
-                print("✓ Feedback table already exists, skipping migration")
-                return
-            
-            print("Creating feedback table...")
-            
-            # Create feedback table
-            create_table_stmt = text("""
-                CREATE TABLE feedback (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    name VARCHAR(200) NOT NULL,
-                    email VARCHAR(200) NOT NULL,
-                    message TEXT NOT NULL,
-                    read BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-                );
-            """)
-            
-            await session.execute(create_table_stmt)
-            
-            # Create index on read status for faster queries
-            create_index_stmt = text("""
-                CREATE INDEX IF NOT EXISTS ix_feedback_read ON feedback(read);
-            """)
-            await session.execute(create_index_stmt)
-            
-            # Create index on created_at for sorting
-            create_index_stmt2 = text("""
-                CREATE INDEX IF NOT EXISTS ix_feedback_created_at ON feedback(created_at DESC);
-            """)
-            await session.execute(create_index_stmt2)
-            
-            await session.commit()
-            print("✓ Feedback table created successfully")
-            
-        except Exception as e:
-            await session.rollback()
-            print(f"✗ Error: {e}")
-            import traceback
-            print("Full traceback:")
-            traceback.print_exc()
-            raise
+    print("Attempting to establish database connection...")
+    try:
+        async with async_session() as session:
+            try:
+                # Check if feedback table already exists
+                check_stmt = text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'feedback'
+                    );
+                """)
+                result = await session.execute(check_stmt)
+                exists = result.scalar()
+                
+                if exists:
+                    print("✓ Feedback table already exists, skipping migration")
+                    return
+                
+                print("Creating feedback table...")
+                
+                # Create feedback table
+                create_table_stmt = text("""
+                    CREATE TABLE feedback (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        name VARCHAR(200) NOT NULL,
+                        email VARCHAR(200) NOT NULL,
+                        message TEXT NOT NULL,
+                        read BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+                    );
+                """)
+                
+                await session.execute(create_table_stmt)
+                
+                # Create index on read status for faster queries
+                create_index_stmt = text("""
+                    CREATE INDEX IF NOT EXISTS ix_feedback_read ON feedback(read);
+                """)
+                await session.execute(create_index_stmt)
+                
+                # Create index on created_at for sorting
+                create_index_stmt2 = text("""
+                    CREATE INDEX IF NOT EXISTS ix_feedback_created_at ON feedback(created_at DESC);
+                """)
+                await session.execute(create_index_stmt2)
+                
+                await session.commit()
+                print("✓ Feedback table created successfully")
+            except Exception as e:
+                await session.rollback()
+                print(f"✗ Error during migration: {e}")
+                import traceback
+                print("Full traceback:")
+                traceback.print_exc()
+                raise
+    except Exception as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        import traceback
+        print("Full traceback:")
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":

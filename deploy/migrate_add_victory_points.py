@@ -74,28 +74,35 @@ async def migrate():
         print(f"  DATABASE_URL value: {repr(DATABASE_URL)}")
         raise
     
-    async with engine.begin() as conn:
-        # Check if column already exists
-        check_query = text("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='players' AND column_name='victory_points'
-        """)
-        result = await conn.execute(check_query)
-        exists = result.fetchone() is not None
-        
-        if exists:
-            print("Column 'victory_points' already exists. Skipping migration.")
-        else:
-            # Add the column
-            alter_query = text("""
-                ALTER TABLE players 
-                ADD COLUMN victory_points INTEGER NOT NULL DEFAULT 0
+    print("Attempting to connect to database...")
+    try:
+        async with engine.begin() as conn:
+            # Check if column already exists
+            check_query = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='players' AND column_name='victory_points'
             """)
-            await conn.execute(alter_query)
-            print("Successfully added 'victory_points' column to players table!")
-    
-    await engine.dispose()
+            result = await conn.execute(check_query)
+            exists = result.fetchone() is not None
+            
+            if exists:
+                print("Column 'victory_points' already exists. Skipping migration.")
+            else:
+                # Add the column
+                alter_query = text("""
+                    ALTER TABLE players 
+                    ADD COLUMN victory_points INTEGER NOT NULL DEFAULT 0
+                """)
+                await conn.execute(alter_query)
+                print("Successfully added 'victory_points' column to players table!")
+    except Exception as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        await engine.dispose()
 
 if __name__ == "__main__":
     asyncio.run(migrate())

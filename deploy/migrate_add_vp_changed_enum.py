@@ -74,28 +74,35 @@ async def migrate():
         print(f"  DATABASE_URL value: {repr(DATABASE_URL)}")
         raise
     
-    async with engine.begin() as conn:
-        # Check if VP_CHANGED already exists in the enum
-        check_query = text("""
-            SELECT enumlabel 
-            FROM pg_enum 
-            WHERE enumlabel = 'vp_changed' 
-            AND oid = (SELECT oid FROM pg_type WHERE typname = 'eventtype')
-        """)
-        result = await conn.execute(check_query)
-        exists = result.fetchone() is not None
-        
-        if exists:
-            print("Enum value 'vp_changed' already exists. Skipping migration.")
-        else:
-            # Add the new enum value
-            alter_query = text("""
-                ALTER TYPE eventtype ADD VALUE IF NOT EXISTS 'vp_changed'
+    print("Attempting to connect to database...")
+    try:
+        async with engine.begin() as conn:
+            # Check if VP_CHANGED already exists in the enum
+            check_query = text("""
+                SELECT enumlabel 
+                FROM pg_enum 
+                WHERE enumlabel = 'vp_changed' 
+                AND oid = (SELECT oid FROM pg_type WHERE typname = 'eventtype')
             """)
-            await conn.execute(alter_query)
-            print("Successfully added 'vp_changed' to eventtype enum!")
-    
-    await engine.dispose()
+            result = await conn.execute(check_query)
+            exists = result.fetchone() is not None
+            
+            if exists:
+                print("Enum value 'vp_changed' already exists. Skipping migration.")
+            else:
+                # Add the new enum value
+                alter_query = text("""
+                    ALTER TYPE eventtype ADD VALUE IF NOT EXISTS 'vp_changed'
+                """)
+                await conn.execute(alter_query)
+                print("Successfully added 'vp_changed' to eventtype enum!")
+    except Exception as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        await engine.dispose()
 
 if __name__ == "__main__":
     asyncio.run(migrate())
