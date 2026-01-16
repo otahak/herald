@@ -142,6 +142,9 @@ async def main():
         except Exception as e:
             await session.rollback()
             print(f"✗ Error: {e}")
+            import traceback
+            print("Full traceback:")
+            traceback.print_exc()
             raise
 
 

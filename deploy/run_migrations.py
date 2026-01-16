@@ -154,14 +154,30 @@ async def run_migration(script_path: Path):
         text=True,
     )
     
-    # Print output
+    # Print output - always show both stdout and stderr
+    print("=" * 60)
     if result.stdout:
+        print("=== STDOUT ===")
         print(result.stdout)
+    else:
+        print("=== STDOUT ===")
+        print("(empty)")
+    
     if result.stderr:
+        print("=== STDERR ===", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
+    else:
+        print("=== STDERR ===")
+        print("(empty)")
+    print("=" * 60)
     
     if result.returncode != 0:
         print(f"❌ Migration {script_path.name} failed with exit code {result.returncode}")
+        if not result.stdout and not result.stderr:
+            print("  WARNING: No output captured from migration script!")
+            print("  This might indicate the script failed to start or was killed.")
+            print(f"  Command was: {' '.join(cmd)}")
+            print(f"  Working directory: {PROJECT_ROOT}")
         return False
     else:
         print(f"✅ Migration {script_path.name} completed successfully")
