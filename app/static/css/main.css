@@ -10,3 +10,15 @@ nav ul {
 nav li {
     margin: 5px
 }
+
+/* Ensure footer stays at bottom */
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+main {
+    flex: 1;
+    padding-bottom: 5rem; /* Adequate padding for footer */
+}

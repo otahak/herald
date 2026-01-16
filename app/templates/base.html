@@ -14,9 +14,9 @@
     <link rel="stylesheet" href="/static/css/main.css">
     {% block head %}{% endblock %}
 </head>
-<body>
+<body class="flex flex-col min-h-screen">
     {% include "nav.html" %}
-    <main id="app">
+    <main id="app" class="flex-1 pb-20">
         {% block content %}{% endblock %}
     </main>
     {% include "footer.html" %}
