@@ -29,7 +29,7 @@ logger = logging.getLogger("Herald.games")
 class CreateGameRequest(BaseModel):
     """Request to create a new game."""
     name: str = Field(default="New Game", max_length=100)
-    game_system: Optional[GameSystem] = Field(default=GameSystem.GFF)
+    game_system: Optional[GameSystem] = Field(default=None)
     player_name: str = Field(max_length=50)
     player_color: str = Field(default="#3b82f6", max_length=20)
 
@@ -262,10 +262,10 @@ class GamesController(Controller):
         logger.info(f"Creating new game: '{data.name}' ({data.game_system})")
         
         try:
-            # Create game
+            # Create game (use default GFF if game_system not provided)
             game = Game(
                 name=data.name,
-                game_system=data.game_system,
+                game_system=data.game_system or GameSystem.GFF,
             )
             session.add(game)
             await session.flush()  # Get game ID
