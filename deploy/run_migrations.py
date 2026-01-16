@@ -21,37 +21,55 @@ def load_env_file():
     env_file = PROJECT_ROOT / ".env"
     env_vars = {}
     
-    if env_file.exists():
-        print(f"Loading environment variables from {env_file}")
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                # Skip comments and empty lines
-                if not line or line.startswith("#"):
-                    continue
-                # Parse KEY=VALUE format
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    key = key.strip()
-                    # Remove quotes from value if present
-                    value = value.strip()
-                    if value.startswith('"') and value.endswith('"'):
-                        value = value[1:-1]
-                    elif value.startswith("'") and value.endswith("'"):
-                        value = value[1:-1]
-                    env_vars[key] = value
-                    # Don't print sensitive values, but show we loaded them
-                    if key == "DATABASE_URL":
-                        # Show first and last few chars for debugging
-                        db_url = value
-                        if len(db_url) > 50:
-                            print(f"  Loaded {key} = {db_url[:20]}...{db_url[-10:]}")
+    # Try multiple possible locations
+    possible_locations = [
+        env_file,  # /opt/herald/.env
+        Path("/opt/herald/.env"),  # Absolute path
+        PROJECT_ROOT.parent / ".env",  # Parent directory
+    ]
+    
+    env_file_found = None
+    for loc in possible_locations:
+        if loc.exists() and loc.is_file():
+            env_file_found = loc
+            break
+    
+    if env_file_found:
+        print(f"Loading environment variables from {env_file_found}")
+        try:
+            with open(env_file_found, "r") as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith("#"):
+                        continue
+                    # Parse KEY=VALUE format
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        key = key.strip()
+                        # Remove quotes from value if present
+                        value = value.strip()
+                        if value.startswith('"') and value.endswith('"'):
+                            value = value[1:-1]
+                        elif value.startswith("'") and value.endswith("'"):
+                            value = value[1:-1]
+                        env_vars[key] = value
+                        # Don't print sensitive values, but show we loaded them
+                        if key == "DATABASE_URL":
+                            # Show first and last few chars for debugging
+                            db_url = value
+                            if len(db_url) > 50:
+                                print(f"  Loaded {key} = {db_url[:20]}...{db_url[-10:]}")
+                            else:
+                                print(f"  Loaded {key} = (hidden, length: {len(db_url)})")
                         else:
-                            print(f"  Loaded {key} = (hidden)")
-                    else:
-                        print(f"  Loaded {key}")
+                            print(f"  Loaded {key}")
+        except Exception as e:
+            print(f"ERROR: Failed to read .env file at {env_file_found}: {e}")
     else:
-        print(f"WARNING: .env file not found at {env_file}")
+        print(f"WARNING: .env file not found. Tried:")
+        for loc in possible_locations:
+            print(f"  - {loc} (exists: {loc.exists()})")
     
     return env_vars
 

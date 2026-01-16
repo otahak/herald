@@ -20,30 +20,43 @@ async def main():
     database_url = os.getenv("DATABASE_URL")
     
     if not database_url:
-        # Try loading from .env file
-        env_file = PROJECT_ROOT / ".env"
-        if env_file.exists():
-            try:
-                with open(env_file, "r") as f:
-                    for line in f:
-                        line = line.strip()
-                        # Skip comments and empty lines
-                        if not line or line.startswith("#"):
-                            continue
-                        if line.startswith("DATABASE_URL="):
-                            # Split on first = only
-                            database_url = line.split("=", 1)[1].strip()
-                            # Remove surrounding quotes if present
-                            if database_url.startswith('"') and database_url.endswith('"'):
-                                database_url = database_url[1:-1]
-                            elif database_url.startswith("'") and database_url.endswith("'"):
-                                database_url = database_url[1:-1]
-                            print(f"Loaded DATABASE_URL from .env file")
-                            break
-            except Exception as e:
-                print(f"Warning: Could not read .env file at {env_file}: {e}")
-        else:
-            print(f"Warning: .env file not found at {env_file}")
+        # Try loading from .env file - check multiple possible locations
+        possible_locations = [
+            PROJECT_ROOT / ".env",
+            Path("/opt/herald/.env"),
+            PROJECT_ROOT.parent / ".env",
+        ]
+        
+        for env_file in possible_locations:
+            if env_file.exists() and env_file.is_file():
+                try:
+                    print(f"Attempting to read .env from: {env_file}")
+                    with open(env_file, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            # Skip comments and empty lines
+                            if not line or line.startswith("#"):
+                                continue
+                            if line.startswith("DATABASE_URL="):
+                                # Split on first = only
+                                database_url = line.split("=", 1)[1].strip()
+                                # Remove surrounding quotes if present
+                                if database_url.startswith('"') and database_url.endswith('"'):
+                                    database_url = database_url[1:-1]
+                                elif database_url.startswith("'") and database_url.endswith("'"):
+                                    database_url = database_url[1:-1]
+                                print(f"✓ Loaded DATABASE_URL from .env file: {env_file}")
+                                print(f"  DATABASE_URL length: {len(database_url)}")
+                                break
+                    if database_url:
+                        break
+                except Exception as e:
+                    print(f"Warning: Could not read .env file at {env_file}: {e}")
+        
+        if not database_url:
+            print(f"Warning: .env file not found. Tried:")
+            for loc in possible_locations:
+                print(f"  - {loc} (exists: {loc.exists()}, is_file: {loc.is_file() if loc.exists() else False})")
     
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
