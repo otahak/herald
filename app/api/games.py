@@ -714,8 +714,22 @@ class GamesController(Controller):
                 
                 # Automatically detach any attached heroes when parent is destroyed
                 # Heroes may survive as independent units
+                # If parent was shaken, preserve that status on the detached hero
+                parent_was_shaken = unit.state.is_shaken
                 if unit.attached_heroes:
                     for attached_hero in unit.attached_heroes:
+                        # Preserve shaken status if parent was shaken
+                        if parent_was_shaken and attached_hero.state:
+                            if not attached_hero.state.is_shaken:
+                                attached_hero.state.is_shaken = True
+                                await log_event(
+                                    session, game,
+                                    EventType.STATUS_SHAKEN,
+                                    f"{attached_hero.display_name} remains Shaken after detachment (parent was Shaken)",
+                                    player_id=attached_hero.player_id,
+                                    target_unit_id=attached_hero.id,
+                                )
+                        
                         attached_hero.attached_to_unit_id = None
                         await log_event(
                             session, game,

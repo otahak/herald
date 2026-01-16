@@ -631,6 +631,110 @@ async def test_automatic_detachment_on_destroy(client):
 
 
 @pytest.mark.asyncio
+async def test_shaken_status_preserved_on_detachment(client):
+    """Test that shaken status is preserved when a shaken parent unit is destroyed."""
+    # Create game and import units with attachments
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ShakenDetachTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import units with attachment
+    fake_units = [
+        {
+            "name": "Shaken Parent",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 200,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Surviving Hero",
+            "quality": 3,
+            "defense": 3,
+            "size": 1,
+            "cost": 50,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+            "joinToUnit": "s1",  # Attached to parent
+        },
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the units
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    parent_unit = next((u for u in units if u.get("name") == "Shaken Parent"), None)
+    hero_unit = next((u for u in units if u.get("name") == "Surviving Hero"), None)
+    
+    assert parent_unit is not None
+    assert hero_unit is not None
+    assert hero_unit.get("attached_to_unit_id") == parent_unit["id"]
+    
+    # Set parent unit to shaken
+    resp_shaken = await client.patch(
+        f"/api/games/{code}/units/{parent_unit['id']}",
+        json={"is_shaken": True},
+    )
+    assert resp_shaken.status_code == 200
+    
+    # Verify hero is also shaken (synced from parent)
+    game_resp_shaken = await client.get(f"/api/games/{code}")
+    units_shaken = game_resp_shaken.json().get("units", [])
+    hero_unit_shaken = next((u for u in units_shaken if u.get("id") == hero_unit["id"]), None)
+    assert hero_unit_shaken is not None
+    assert hero_unit_shaken["state"]["is_shaken"] is True
+    
+    # Destroy the shaken parent unit
+    resp_destroy = await client.patch(
+        f"/api/games/{code}/units/{parent_unit['id']}",
+        json={"deployment_status": "destroyed"},
+    )
+    assert resp_destroy.status_code == 200
+    
+    # Verify hero is detached but still shaken
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    hero_unit2 = next((u for u in units2 if u.get("id") == hero_unit["id"]), None)
+    assert hero_unit2 is not None
+    assert hero_unit2.get("attached_to_unit_id") is None  # Detached
+    assert hero_unit2["state"]["is_shaken"] is True  # Still shaken
+    
+    # Check for events: shaken status preserved on hero
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    shaken_events = [e for e in events if e["event_type"] == "status_shaken" and e.get("target_unit_id") == hero_unit["id"]]
+    # Should have shaken event from when parent was shaken, and possibly one from detachment
+    assert len(shaken_events) > 0
+
+
+@pytest.mark.asyncio
 async def test_shaken_unshaken_logging(client):
     """Test that shaken/unshaken state changes are logged."""
     # Create game and import a unit
