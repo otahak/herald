@@ -6,7 +6,10 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - Create/join games via code; player identity persistence with selection modal
 - Real-time updates over WebSockets (player join, state updates)
 - Unit tracking: wounds/models, activation, morale threshold; transports; limited weapons
-- Objectives: neutral/seized/contested; round/turn tracking; action log
+- **Victory Points**: Manual +/- interface with log consolidation (removals delete corresponding "add" entries)
+- **Round Tracker**: Manual +/- interface for round tracking
+- **Time-based Wound Tracking**: Wounds removed within 30 seconds delete the log entry (quick corrections); wounds removed after 30 seconds log as heals
+- Action log: Automatic logging of all game state changes with human-readable descriptions
 - Army Forge import (share link) per player with log entry
 - Responsive/mobile-friendly UI
 
@@ -15,7 +18,7 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - Frontend: Vue 3 (CDN), TailwindCSS + DaisyUI, Jinja templates. Screens in `app/game/templates/game/board.html` and `lobby.html`.
 - Realtime: WebSockets via `app/api/websocket.py` (`state`, `state_update`, `player_joined`, `player_left`).
 - State store: `app/static/js/store/gameStore.js` (fetches, identity persistence, WS handling).
-- Data models: `app/models/*` (Game, Player, Unit, UnitState, Objective, GameEvent).
+- Data models: `app/models/*` (Game, Player, Unit, UnitState, GameEvent).
 
 ## Project Layout
 - `app/main.py` – Litestar app wiring (DB plugin, templates, routes)
@@ -92,11 +95,15 @@ npm run test:e2e:headed # headed/debug
 Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal dismissal, army import sync (host sees units). Skips on CI by default.
 
 ## Key Endpoints
-- `POST /api/games` – create game
+- `POST /api/games` – create game (game_system optional, defaults to GFF)
 - `POST /api/games/{code}/join` – join game
 - `POST /api/games/{code}/start` – start game
 - `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`)
-- `GET /api/games/{code}` – fetch game state (players, units, objectives)
+- `GET /api/games/{code}` – fetch game state (players, units, events)
+- `GET /api/games/{code}/events` – fetch game event log
+- `PATCH /api/games/{code}/players/{player_id}/victory-points` – update VP (`delta: int`)
+- `PATCH /api/games/{code}/round` – update round (`delta: int`)
+- `PATCH /api/games/{code}/units/{unit_id}` – update unit state (wounds, activation, etc.)
 - `GET /ws/game/{code}` – WebSocket (messages: `state`, `state_update`, `player_joined`, `player_left`, `error`)
 
 ## Frontend State / Identity
