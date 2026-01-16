@@ -6,6 +6,15 @@
  */
 
 const GameStore = {
+    /**
+     * Get base path for API calls (empty for localhost, /herald for production)
+     */
+    getBasePath() {
+        return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? ''
+            : '/herald';
+    },
+    
     // Reactive state
     state: Vue.reactive({
         // Connection state
@@ -111,7 +120,8 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch('/api/games', {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -149,7 +159,8 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch(`/api/games/${code}/join`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/join`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -189,7 +200,8 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch(`/api/games/${code}`);
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}`);
                 
                 if (!response.ok) {
                     const error = await response.json();
@@ -219,7 +231,8 @@ const GameStore = {
             GameStore.state.error = null;
             
             try {
-                const response = await fetch(`/api/proxy/import-army/${code}`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/proxy/import-army/${code}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -258,7 +271,8 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`/api/games/${code}/units/${unitId}`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(changes),
@@ -298,7 +312,8 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`/api/games/${code}/objectives/${objectiveId}`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/objectives/${objectiveId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -341,7 +356,8 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`/api/games/${code}/objectives`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/objectives`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ count }),
@@ -373,7 +389,8 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`/api/games/${code}/start`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/start`, {
                     method: 'POST',
                 });
                 
@@ -408,7 +425,8 @@ const GameStore = {
             const newRound = (GameStore.state.game.current_round || 1) + 1;
             
             try {
-                const response = await fetch(`/api/games/${code}/state`, {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/state`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ current_round: newRound }),
@@ -439,7 +457,8 @@ const GameStore = {
             if (!code) return;
             
             try {
-                const response = await fetch(`/api/games/${code}/events?limit=${limit}`);
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/events?limit=${limit}`);
                 
                 if (!response.ok) {
                     const error = await response.json();

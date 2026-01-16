@@ -865,7 +865,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     const code = game.value?.code;
                     if (!code) return;
                     
-                    const response = await fetch(`/api/games/${code}/players/${playerId}/victory-points`, {
+                    const basePath = getBasePath();
+                    const response = await fetch(`${basePath}/api/games/${code}/players/${playerId}/victory-points`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ delta }),
@@ -968,7 +969,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const endGame = async () => {
                 if (confirm('End the game? This cannot be undone.')) {
                     const code = game.value?.code;
-                    await fetch(`/api/games/${code}/state`, {
+                    const basePath = getBasePath();
+                    await fetch(`${basePath}/api/games/${code}/state`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ status: 'completed' }),

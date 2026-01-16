@@ -85,8 +85,8 @@ class GameEvent(Base):
         nullable=True,
     )
     
-    # Event type
-    event_type: Mapped[EventType] = mapped_column(Enum(EventType))
+    # Event type - use native enum (SQLAlchemy stores enum NAMES by default, matching database)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType, native_enum=True))
     
     # Human-readable description
     # e.g., "Player 1 dealt 2 wounds to Tactical Squad (4/6 remaining)"
@@ -139,7 +139,7 @@ class GameEvent(Base):
         return cls(
             game_id=game_id,
             player_id=player_id,
-            event_type=event_type,
+            event_type=event_type,  # EventType is str enum, so this is already the value string
             description=description,
             round_number=round_number,
             target_unit_id=target_unit_id,

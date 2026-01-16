@@ -816,6 +816,8 @@ class GamesController(Controller):
         player.victory_points = max(0, player.victory_points + data.delta)  # Prevent negative VP
         
         # Log event
+        # Note: EventType.VP_CHANGED is a str enum, so it should serialize to "vp_changed"
+        # If SQLAlchemy uses the name instead, we'll need to configure the Enum column differently
         await log_event(
             session, game,
             EventType.VP_CHANGED,
