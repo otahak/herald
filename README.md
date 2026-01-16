@@ -49,6 +49,18 @@ Or via Docker Compose:
 docker compose up --build
 ```
 
+## Production Deployment
+
+See `deploy/README.md` for full deployment guide to DigitalOcean or similar VPS.
+
+Quick summary:
+- Systemd service (`deploy/herald.service`) runs the app
+- Nginx reverse proxy (`deploy/nginx.conf`) handles HTTP/WebSocket
+- Automated deploy script (`deploy/deploy.sh`) sets up everything
+- Database initialization script (`deploy/init_db.py`) creates schema
+
+For a 2GB/1vCPU droplet, the service runs 2 uvicorn workers and binds to localhost (nginx handles external traffic).
+
 ## Just Commands
 - `just`                 – list recipes
 - `just init`            – build Docker image

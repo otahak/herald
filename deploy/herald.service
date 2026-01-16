@@ -1,0 +1,31 @@
+[Unit]
+Description=Herald Game Scoreboard Application
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=herald
+Group=herald
+WorkingDirectory=/opt/herald
+Environment="PATH=/opt/herald/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="DATABASE_URL=postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
+Environment="APP_DEBUG=false"
+ExecStart=/opt/herald/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --root-path /herald
+Restart=always
+RestartSec=10
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/herald
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=herald
+
+[Install]
+WantedBy=multi-user.target

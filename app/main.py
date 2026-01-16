@@ -31,7 +31,7 @@ config = SQLAlchemyAsyncConfig(
     connection_string=DATABASE_URL,
     session_dependency_key="session",
     metadata=Base.metadata,  # Use our models' metadata
-    create_all=True,  # Auto-create tables on startup (dev only)
+    create_all=DEBUG,  # Auto-create tables on startup (dev only)
 )
 plugin = SQLAlchemyInitPlugin(config)
 
