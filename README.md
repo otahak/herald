@@ -9,6 +9,9 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - **Victory Points**: Manual +/- interface with log consolidation (removals delete corresponding "add" entries)
 - **Round Tracker**: Manual +/- interface for round tracking
 - **Time-based Wound Tracking**: Wounds removed within 30 seconds delete the log entry (quick corrections); wounds removed after 30 seconds log as heals
+- **Attached Units**: Heroes attached to parent units are visually grouped and controlled together; single activate button for combined units
+- **Unit Detachment**: Manual detachment of heroes from parent units; automatic detachment when parent is destroyed
+- **Shaken/Unshaken Logging**: All shaken state changes are logged with proper event tracking
 - Action log: Automatic logging of all game state changes with human-readable descriptions
 - Army Forge import (share link) per player with log entry
 - Responsive/mobile-friendly UI
@@ -104,6 +107,7 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - `PATCH /api/games/{code}/players/{player_id}/victory-points` – update VP (`delta: int`)
 - `PATCH /api/games/{code}/round` – update round (`delta: int`)
 - `PATCH /api/games/{code}/units/{unit_id}` – update unit state (wounds, activation, etc.)
+- `PATCH /api/games/{code}/units/{unit_id}/detach` – manually detach a hero from its parent unit
 - `GET /ws/game/{code}` – WebSocket (messages: `state`, `state_update`, `player_joined`, `player_left`, `error`)
 
 ## Frontend State / Identity

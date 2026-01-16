@@ -182,6 +182,7 @@ async def get_game_state(session: AsyncSession, code: str) -> Optional[dict]:
                 "transport_capacity": unit.transport_capacity,
                 "has_ambush": unit.has_ambush,
                 "has_scout": unit.has_scout,
+                "attached_to_unit_id": str(unit.attached_to_unit_id) if unit.attached_to_unit_id else None,
             }
             
             if unit.state:

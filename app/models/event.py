@@ -32,6 +32,7 @@ class EventType(str, enum.Enum):
     UNIT_DEPLOYED = "unit_deployed"        # From ambush/reserve
     UNIT_EMBARKED = "unit_embarked"        # Entered transport
     UNIT_DISEMBARKED = "unit_disembarked"  # Left transport
+    UNIT_DETACHED = "unit_detached"        # Hero detached from parent unit
     
     # Status events
     STATUS_SHAKEN = "status_shaken"

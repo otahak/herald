@@ -10,6 +10,9 @@
 .unit-card.activated { opacity: 0.6; }
 .unit-card.shaken { border-color: #fbbf24 !important; }
 .unit-card.destroyed { opacity: 0.4; filter: grayscale(1); }
+.unit-group { margin-bottom: 0.5rem; }
+.unit-group .unit-card:not(:first-child) { margin-top: -0.25rem; }
+.unit-group .bg-base-200 { border-left: 2px solid hsl(var(--p)); }
 
 .health-bar { transition: width 0.3s ease; }
 .objective-marker { transition: all 0.2s ease; cursor: pointer; }
@@ -471,15 +474,16 @@
 
 <!-- Unit Card Component Template -->
 <template id="unit-card-template">
-    <div 
-        class="unit-card card card-compact bg-base-100 shadow"
-        :class="{
-            'activated': unit.state?.activated_this_round,
-            'shaken': unit.state?.is_shaken,
-            'destroyed': unit.state?.deployment_status === 'destroyed',
-            'border-2 border-warning': unit.state?.is_shaken,
-        }"
-    >
+    <div class="unit-group">
+        <div 
+            class="unit-card card card-compact bg-base-100 shadow"
+            :class="{
+                'activated': unit.state?.activated_this_round,
+                'shaken': unit.state?.is_shaken,
+                'destroyed': unit.state?.deployment_status === 'destroyed',
+                'border-2 border-warning': unit.state?.is_shaken,
+            }"
+        >
         <div class="card-body p-3">
             <!-- Header -->
             <div class="flex items-center justify-between">
@@ -488,6 +492,7 @@
                     <span class="badge badge-sm">[[ unit.size ]]</span>
                     <span v-if="unit.is_hero" class="badge badge-sm badge-secondary">Hero</span>
                     <span v-if="unit.is_caster" class="badge badge-sm badge-accent">Caster</span>
+                    <span v-if="attachedHeroes.length > 0" class="badge badge-sm badge-primary">+[[ attachedHeroes.length ]] Hero[[ attachedHeroes.length > 1 ? 'es' : '' ]]</span>
                 </div>
                 <span class="text-xs text-base-content/50">[[ unit.cost ]]pts</span>
             </div>
@@ -522,7 +527,7 @@
             <!-- Controls (only for own units) -->
             <div v-if="isMine && unit.state" class="unit-controls flex flex-wrap gap-2 mt-2">
                 
-                <!-- Wounds -->
+                <!-- Wounds (parent unit) -->
                 <div class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
                     <span class="text-xs">Wounds:</span>
                     <button class="btn btn-xs btn-circle" @click="adjustWounds(-1)" :disabled="unit.state.wounds_taken <= 0">-</button>
@@ -530,13 +535,33 @@
                     <button class="btn btn-xs btn-circle" @click="adjustWounds(1)" :disabled="unit.state.wounds_taken >= maxWounds">+</button>
                 </div>
                 
-                <!-- Spell Tokens (for Casters) -->
+                <!-- Attached Hero Wounds (if any) -->
+                <template v-for="hero in attachedHeroes" :key="hero.id">
+                    <div v-if="hero && hero.state" class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
+                        <span class="text-xs">[[ hero.custom_name || hero.name ]] W:</span>
+                        <button class="btn btn-xs btn-circle" @click="adjustHeroWounds(hero, -1)" :disabled="!hero.state || hero.state.wounds_taken <= 0">-</button>
+                        <span class="font-mono w-8 text-center">[[ hero.state?.wounds_taken || 0 ]] / [[ hero.size * hero.tough ]]</span>
+                        <button class="btn btn-xs btn-circle" @click="adjustHeroWounds(hero, 1)" :disabled="!hero.state || hero.state.wounds_taken >= (hero.size * hero.tough)">+</button>
+                    </div>
+                </template>
+                
+                <!-- Spell Tokens (for Casters - parent unit) -->
                 <div v-if="unit.is_caster" class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
                     <span class="text-xs">Tokens:</span>
                     <button class="btn btn-xs btn-circle" @click="adjustTokens(-1)" :disabled="unit.state.spell_tokens <= 0">-</button>
                     <span class="font-mono w-8 text-center">[[ unit.state.spell_tokens ]] / 6</span>
                     <button class="btn btn-xs btn-circle" @click="adjustTokens(1)" :disabled="unit.state.spell_tokens >= 6">+</button>
                 </div>
+                
+                <!-- Attached Hero Spell Tokens (if any) -->
+                <template v-for="hero in attachedHeroes" :key="`tokens-${hero.id}`">
+                    <div v-if="hero && hero.is_caster && hero.state" class="flex items-center gap-1 bg-base-200 rounded px-2 py-1">
+                        <span class="text-xs">[[ hero.custom_name || hero.name ]] T:</span>
+                        <button class="btn btn-xs btn-circle" @click="adjustHeroTokens(hero, -1)" :disabled="!hero.state || hero.state.spell_tokens <= 0">-</button>
+                        <span class="font-mono w-8 text-center">[[ hero.state?.spell_tokens || 0 ]] / 6</span>
+                        <button class="btn btn-xs btn-circle" @click="adjustHeroTokens(hero, 1)" :disabled="!hero.state || hero.state.spell_tokens >= 6">+</button>
+                    </div>
+                </template>
                 
                 <!-- Limited Weapons -->
                 <div v-if="limitedWeapons.length > 0" class="w-full">
@@ -557,13 +582,15 @@
                 </div>
                 
                 <!-- Toggle Buttons -->
-                <div class="flex gap-1">
+                <div class="flex gap-1 flex-wrap">
                     <button 
                         class="btn btn-xs"
                         :class="unit.state.activated_this_round ? 'btn-neutral' : 'btn-outline'"
                         @click="toggleActivated"
+                        :disabled="!!unit.attached_to_unit_id"
+                        :title="attachedHeroes.length > 0 ? `Activate ${unit.name} and ${attachedHeroes.length} attached hero${attachedHeroes.length > 1 ? 'es' : ''}` : (unit.attached_to_unit_id ? 'Attached heroes activate with their parent unit' : '')"
                     >
-                        [[ unit.state.activated_this_round ? '✓ Activated' : 'Activate' ]]
+                        [[ unit.state.activated_this_round ? '✓ Activated' : (attachedHeroes.length > 0 ? `Activate (+${attachedHeroes.length})` : 'Activate') ]]
                     </button>
                     <button 
                         class="btn btn-xs"
@@ -571,6 +598,29 @@
                         @click="toggleShaken"
                     >
                         [[ unit.state.is_shaken ? '⚠ Shaken' : 'Shaken' ]]
+                    </button>
+                    
+                    <!-- Attached Hero Shaken buttons -->
+                    <template v-for="hero in attachedHeroes" :key="`shaken-${hero.id}`">
+                        <button 
+                            v-if="hero && hero.state"
+                            class="btn btn-xs"
+                            :class="hero.state?.is_shaken ? 'btn-warning' : 'btn-outline'"
+                            @click="toggleHeroShaken(hero)"
+                            :title="`Toggle Shaken for ${hero.custom_name || hero.name}`"
+                        >
+                            [[ hero.custom_name || hero.name ]] [[ hero.state?.is_shaken ? '⚠' : '' ]]
+                        </button>
+                    </template>
+                    
+                    <!-- Detach button (for attached heroes) -->
+                    <button 
+                        v-if="unit.attached_to_unit_id"
+                        class="btn btn-xs btn-outline btn-info"
+                        @click="detachUnit"
+                        title="Detach this hero from its parent unit"
+                    >
+                        Detach
                     </button>
                 </div>
                 
@@ -614,6 +664,55 @@
                 </button>
             </div>
         </div>
+        
+        <!-- Attached Heroes (nested below parent unit) -->
+        <div v-if="attachedHeroes && attachedHeroes.length > 0" class="ml-4 mt-0 space-y-0 border-l-2 border-primary pl-2">
+            <template v-for="hero in attachedHeroes" :key="hero.id">
+                <div 
+                    v-if="hero"
+                    class="unit-card card card-compact bg-base-200 shadow-sm -mt-1 first:mt-0"
+                    :class="{
+                        'activated': hero.state?.activated_this_round,
+                        'shaken': hero.state?.is_shaken,
+                        'destroyed': hero.state?.deployment_status === 'destroyed',
+                    }"
+                >
+                <div class="card-body p-2">
+                    <!-- Hero Header (compact) -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs font-semibold">[[ hero.custom_name || hero.name ]]</span>
+                            <span class="badge badge-xs">[[ hero.size ]]</span>
+                            <span v-if="hero.is_hero" class="badge badge-xs badge-secondary">Hero</span>
+                            <span v-if="hero.is_caster" class="badge badge-xs badge-accent">Caster</span>
+                        </div>
+                        <span class="text-xs text-base-content/50">[[ hero.cost ]]pts</span>
+                    </div>
+                    
+                    <!-- Hero Stats (compact) -->
+                    <div class="flex gap-3 text-xs text-base-content/70">
+                        <span><strong>Q</strong>[[ hero.quality ]]+</span>
+                        <span><strong>D</strong>[[ hero.defense ]]+</span>
+                        <span v-if="hero.tough > 1"><strong>T</strong>[[ hero.tough ]]</span>
+                    </div>
+                    
+                    <!-- Hero Status Badges -->
+                    <div class="flex flex-wrap gap-1 text-xs" v-if="hero && hero.state">
+                        <span v-if="hero.state.deployment_status === 'in_ambush'" class="badge badge-xs badge-info">Ambush</span>
+                        <span v-if="hero.state.is_fatigued" class="badge badge-xs badge-warning">Fatigued</span>
+                        <span v-if="hero.state.activated_this_round" class="badge badge-xs badge-neutral">Activated</span>
+                    </div>
+                    
+                    <!-- Hero Status (read-only, controls are on parent unit) -->
+                    <div v-if="hero && hero.state" class="text-xs text-base-content/70 mt-1">
+                        <span>W: [[ hero.state?.wounds_taken || 0 ]] / [[ hero.size * hero.tough ]]</span>
+                        <span v-if="hero.is_caster" class="ml-2">T: [[ hero.state?.spell_tokens || 0 ]] / 6</span>
+                        <span v-if="hero.state?.is_shaken" class="ml-2 text-warning">⚠ Shaken</span>
+                    </div>
+                </div>
+                </div>
+            </template>
+        </div>
     </div>
 </template>
 
@@ -635,6 +734,21 @@ document.addEventListener("DOMContentLoaded", () => {
             const store = GameStore;
             
             const maxWounds = computed(() => props.unit.size * props.unit.tough);
+            
+            // Find attached heroes for this unit
+            const attachedHeroes = computed(() => {
+                if (!store.state.units || !Array.isArray(store.state.units)) {
+                    return [];
+                }
+                return store.state.units.filter(u => u && u.attached_to_unit_id === props.unit.id);
+            });
+            
+            // Find parent unit if this unit is attached
+            const attachedToUnitName = computed(() => {
+                if (!props.unit.attached_to_unit_id) return null;
+                const parentUnit = store.state.units.find(u => u.id === props.unit.attached_to_unit_id);
+                return parentUnit ? (parentUnit.custom_name || parentUnit.name) : null;
+            });
             
             const canDeploy = computed(() => {
                 return store.state.game?.current_round >= 2;
@@ -756,6 +870,10 @@ document.addEventListener("DOMContentLoaded", () => {
             };
             
             const toggleActivated = () => {
+                if (props.unit.attached_to_unit_id) {
+                    alert(`${props.unit.custom_name || props.unit.name} is attached to another unit and cannot be activated separately. Activate the parent unit instead.`);
+                    return;
+                }
                 emit('update', props.unit.id, { activated_this_round: !props.unit.state.activated_this_round });
             };
             
@@ -773,8 +891,59 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             };
             
+            // Helper functions for attached heroes
+            const adjustHeroWounds = (hero, delta) => {
+                if (!hero || !hero.state) return;
+                const maxWounds = hero.size * hero.tough;
+                const newWounds = Math.max(0, Math.min(maxWounds, hero.state.wounds_taken + delta));
+                emit('update', hero.id, { wounds_taken: newWounds });
+            };
+            
+            const adjustHeroTokens = (hero, delta) => {
+                if (!hero || !hero.state) return;
+                const newTokens = Math.max(0, Math.min(6, hero.state.spell_tokens + delta));
+                emit('update', hero.id, { spell_tokens: newTokens });
+            };
+            
+            const toggleHeroShaken = (hero) => {
+                if (!hero || !hero.state) return;
+                emit('update', hero.id, { is_shaken: !hero.state.is_shaken });
+            };
+            
+            const detachUnit = async () => {
+                if (!confirm(`Detach ${props.unit.custom_name || props.unit.name} from its parent unit?`)) {
+                    return;
+                }
+                
+                try {
+                    const code = store.state.game?.code;
+                    if (!code) return;
+                    
+                    // Get base path from window location
+                    const pathParts = window.location.pathname.split('/');
+                    const basePath = pathParts.slice(0, -2).join('/') || '';
+                    
+                    const response = await fetch(`${basePath}/api/games/${code}/units/${props.unit.id}/detach`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                    
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'Failed to detach unit');
+                    }
+                    
+                    // Refresh game state
+                    await store.actions.fetchGame(code);
+                } catch (error) {
+                    alert('Failed to detach unit: ' + error.message);
+                }
+            };
+            
             return {
                 maxWounds,
+                attachedHeroes,
+                attachedToUnitName,
                 canDeploy,
                 embarkedUnits,
                 embarkedCount,
@@ -792,6 +961,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 toggleShaken,
                 deployUnit,
                 destroyUnit,
+                adjustHeroWounds,
+                adjustHeroTokens,
+                toggleHeroShaken,
+                detachUnit,
             };
         },
     };
@@ -849,7 +1022,15 @@ document.addEventListener("DOMContentLoaded", () => {
             
             // Methods
             const getPlayerUnits = (playerId) => {
-                return units.value.filter(u => u.player_id === playerId);
+                // Return only units that are not attached to another unit
+                // (attached heroes will be shown nested with their parent)
+                return units.value.filter(u => 
+                    u.player_id === playerId && !u.attached_to_unit_id
+                );
+            };
+            
+            const getAttachedHeroes = (parentUnitId) => {
+                return units.value.filter(u => u.attached_to_unit_id === parentUnitId);
             };
             
             const getArmyHealth = (playerId) => {
@@ -986,9 +1167,24 @@ document.addEventListener("DOMContentLoaded", () => {
             const importArmy = async () => {
                 if (!armyForgeUrl.value) return;
                 
+                // Basic frontend validation
+                const url = armyForgeUrl.value.trim();
+                
+                // Check for common console error patterns
+                if (url.toLowerCase().includes('vue.global.js') || 
+                    url.toLowerCase().includes('console') ||
+                    url.toLowerCase().includes('error') ||
+                    url.toLowerCase().includes('warn') ||
+                    url.toLowerCase().includes('traceback') ||
+                    url.toLowerCase().includes('exception') ||
+                    url.length > 500) {
+                    alert('Invalid input detected. Please paste the Army Forge share URL or list ID, not console output.\n\nExample: https://army-forge.onepagerules.com/share?id=XXXXX');
+                    return;
+                }
+                
                 isImporting.value = true;
                 try {
-                    await store.actions.importArmy(GAME_CODE, armyForgeUrl.value);
+                    await store.actions.importArmy(GAME_CODE, url);
                     armyForgeUrl.value = '';
                 } catch (error) {
                     alert('Failed to import: ' + error.message);
@@ -1288,6 +1484,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Methods
                 selectPlayer,
                 getPlayerUnits,
+                getAttachedHeroes,
                 getArmyHealth,
                 isMoraleThreshold,
                 getHealthBarClass,
