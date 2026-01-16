@@ -284,6 +284,12 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         
         methods: {
+            getBasePath() {
+                return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+                    ? ''
+                    : '/herald';
+            },
+            
             async createGame() {
                 this.isLoading = true;
                 this.error = null;
@@ -343,7 +349,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     sessionStorage.setItem('herald_game_code', this.joinForm.gameCode.toUpperCase());
                     
                     // Navigate to game with playerId hint to skip selection modal
-                    window.location.href = `/game/${this.joinForm.gameCode.toUpperCase()}?playerId=${game.your_player_id}`;
+                    const basePath = this.getBasePath();
+                    window.location.href = `${basePath}/game/${this.joinForm.gameCode.toUpperCase()}?playerId=${game.your_player_id}`;
                     
                 } catch (error) {
                     this.error = error.message;
@@ -353,7 +360,8 @@ document.addEventListener("DOMContentLoaded", () => {
             },
             
             goToGame() {
-                window.location.href = `/game/${this.gameCode}`;
+                const basePath = this.getBasePath();
+                window.location.href = `${basePath}/game/${this.gameCode}`;
             },
         },
     };

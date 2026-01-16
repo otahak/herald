@@ -41,6 +41,9 @@ class Player(Base):
     starting_unit_count: Mapped[int] = mapped_column(Integer, default=0)
     starting_points: Mapped[int] = mapped_column(Integer, default=0)
     
+    # Victory points (manually tracked)
+    victory_points: Mapped[int] = mapped_column(Integer, default=0)
+    
     # Turn tracking
     has_finished_activations: Mapped[bool] = mapped_column(Boolean, default=False)
     

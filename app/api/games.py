@@ -69,7 +69,12 @@ class UpdateObjectiveRequest(BaseModel):
 
 class CreateObjectivesRequest(BaseModel):
     """Request to create objectives for a game."""
-    count: int = Field(ge=3, le=5, default=4)
+    count: int = Field(ge=3, le=6, default=4)
+
+
+class UpdateVictoryPointsRequest(BaseModel):
+    """Request to update a player's victory points."""
+    delta: int = Field(description="Change in VP (+1, -1, etc.)")
 
 
 # --- Response Schemas ---
@@ -84,6 +89,7 @@ class PlayerResponse(BaseModel):
     army_name: Optional[str]
     starting_unit_count: int
     starting_points: int
+    victory_points: int
     
     class Config:
         from_attributes = True
@@ -789,3 +795,44 @@ class GamesController(Controller):
         events = result.scalars().all()
         
         return [GameEventResponse.model_validate(e) for e in events]
+    
+    @patch("/{code:str}/players/{player_id:uuid}/victory-points")
+    async def update_victory_points(
+        self,
+        code: str,
+        player_id: uuid.UUID,
+        data: UpdateVictoryPointsRequest,
+        session: AsyncSession,
+    ) -> PlayerResponse:
+        """Update a player's victory points."""
+        game = await get_game_by_code(session, code)
+        
+        # Find the player
+        player = next((p for p in game.players if p.id == player_id), None)
+        if not player:
+            raise NotFoundException(f"Player {player_id} not found in game")
+        
+        # Update VP
+        player.victory_points = max(0, player.victory_points + data.delta)  # Prevent negative VP
+        
+        # Log event
+        await log_event(
+            session, game,
+            EventType.VP_CHANGED,
+            f"{player.name} VP: {player.victory_points - data.delta} → {player.victory_points} ({'+' if data.delta >= 0 else ''}{data.delta})",
+        )
+        
+        await session.commit()
+        await session.refresh(player)
+        
+        # Broadcast state update
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "victory_points_updated",
+                "player_id": str(player_id),
+                "victory_points": player.victory_points,
+            }
+        })
+        
+        return PlayerResponse.model_validate(player)

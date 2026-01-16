@@ -76,11 +76,10 @@ const GameStore = {
             );
         },
         
-        // Calculate VP for a player
+        // Get VP for a player (from player object)
         playerVP(playerId) {
-            return GameStore.state.objectives.filter(o => 
-                o.status === 'seized' && o.controlled_by_id === playerId
-            ).length;
+            const player = GameStore.state.players.find(p => p.id === playerId);
+            return player?.victory_points || 0;
         },
         
         // Army health percentage for a player
@@ -335,6 +334,38 @@ const GameStore = {
         },
         
         /**
+         * Create objectives for a game
+         */
+        async createObjectives(count = 4) {
+            const code = GameStore.state.game?.code;
+            if (!code) return;
+            
+            try {
+                const response = await fetch(`/api/games/${code}/objectives`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to create objectives');
+                }
+                
+                const objectives = await response.json();
+                GameStore.state.objectives = objectives;
+                
+                // Refresh game state to get objectives
+                await this.fetchGame(code);
+                
+                return objectives;
+            } catch (error) {
+                GameStore.state.error = error.message;
+                throw error;
+            }
+        },
+        
+        /**
          * Start the game
          */
         async startGame() {
@@ -355,6 +386,7 @@ const GameStore = {
                 GameStore.state.game = game;
                 GameStore.state.players = game.players;
                 GameStore.state.units = game.units || [];
+                GameStore.state.objectives = game.objectives || [];
                 
                 // Broadcast to other players
                 this.broadcastStateUpdate({ type: 'game_started' });
@@ -433,7 +465,11 @@ const GameStore = {
             }
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/game/${code}`;
+            // Use /herald prefix only if we're on the production domain (not localhost)
+            const basePath = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+                ? '' 
+                : '/herald';
+            const wsUrl = `${protocol}//${window.location.host}${basePath}/ws/game/${code}`;
             
             const ws = new WebSocket(wsUrl);
             

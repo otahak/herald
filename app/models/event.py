@@ -53,6 +53,7 @@ class EventType(str, enum.Enum):
     PLAYER_JOINED = "player_joined"
     PLAYER_LEFT = "player_left"
     ARMY_IMPORTED = "army_imported"
+    VP_CHANGED = "vp_changed"  # Victory points changed
     
     # Other
     CUSTOM = "custom"
