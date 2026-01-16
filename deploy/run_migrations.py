@@ -148,7 +148,25 @@ async def run_migration(script_path: Path):
         db_val = subprocess_env['DATABASE_URL']
         if db_val:
             print(f"DATABASE_URL length: {len(db_val)}")
-            print(f"DATABASE_URL starts with: {db_val[:30] if len(db_val) > 30 else db_val}")
+            # Extract hostname for DNS check
+            if db_val.startswith("postgresql"):
+                try:
+                    # Parse: postgresql+asyncpg://user:pass@host:port/db
+                    parts = db_val.split("@")
+                    if len(parts) == 2:
+                        host_part = parts[1].split("/")[0]  # host:port
+                        hostname = host_part.split(":")[0]
+                        print(f"  Hostname from DATABASE_URL: {hostname}")
+                        # Test DNS resolution
+                        import socket
+                        try:
+                            socket.gethostbyname(hostname)
+                            print(f"  ✓ Hostname '{hostname}' resolves successfully")
+                        except socket.gaierror as e:
+                            print(f"  ✗ Hostname '{hostname}' cannot be resolved: {e}")
+                            print(f"  Suggestion: Use 'localhost' or '127.0.0.1' if database is on same server")
+                except Exception as e:
+                    print(f"  Could not parse DATABASE_URL for hostname: {e}")
         else:
             print("WARNING: DATABASE_URL is empty string!")
     
