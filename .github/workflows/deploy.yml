@@ -45,18 +45,32 @@ jobs:
             
             # Update dependencies
             echo "Updating dependencies..."
-            # Try to find uv, fall back to using it from PATH
-            UV_CMD="uv"
-            if [ -f /usr/local/bin/uv ]; then
-              UV_CMD="/usr/local/bin/uv"
-            elif [ -f /root/.cargo/bin/uv ]; then
-              UV_CMD="/root/.cargo/bin/uv"
+            # The service uses .venv/bin/uvicorn, so .venv should exist
+            # Just ensure pip is up to date and install the package
+            # Skip uv entirely - use pip directly from the venv
+            if [ -d "/opt/herald/.venv" ] && [ -f "/opt/herald/.venv/bin/pip" ]; then
+              echo "Updating dependencies using venv pip..."
+              su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/pip install --upgrade pip && /opt/herald/.venv/bin/pip install -e ."
+            else
+              echo "ERROR: Virtual environment not found at /opt/herald/.venv"
+              echo "This should not happen - the service requires .venv to exist."
+              echo "Skipping dependency update - service may fail to start."
             fi
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:\$PATH\" && $UV_CMD sync --frozen --no-dev"
             
             # Run database migrations
             echo "Running database migrations..."
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:\$PATH\" && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && python3 deploy/run_migrations.py"
+            # Use venv python if available, otherwise try uv run
+            if [ -d "/opt/herald/.venv" ]; then
+              su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && /opt/herald/.venv/bin/python deploy/run_migrations.py"
+            else
+              UV_CMD=$(find /usr/local /root/.cargo /home/herald/.cargo -name uv -type f -executable 2>/dev/null | head -1)
+              if [ -n "$UV_CMD" ]; then
+                su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && $UV_CMD run python deploy/run_migrations.py"
+              else
+                echo "ERROR: Cannot run migrations - no venv and uv not found"
+                exit 1
+              fi
+            fi
             
             # Restart service
             echo "Restarting Herald service..."

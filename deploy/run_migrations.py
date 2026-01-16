@@ -29,11 +29,36 @@ async def run_migration(script_path: Path):
     print(f"Running migration: {script_path.name}")
     print(f"{'='*60}")
     
+    # Try to use uv run if available, otherwise use system python
+    # Check if uv is available
+    uv_cmd = None
+    for path in ["uv", "/usr/local/bin/uv", "/root/.cargo/bin/uv", "/home/herald/.cargo/bin/uv"]:
+        try:
+            result = subprocess.run([path, "--version"], capture_output=True, timeout=2)
+            if result.returncode == 0:
+                uv_cmd = path
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    
+    # Build command - prefer uv run, fall back to python with venv
+    if uv_cmd:
+        cmd = [uv_cmd, "run", "python", str(script_path)]
+        env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
+    else:
+        # Try to use venv python if it exists
+        venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
+        if venv_python.exists():
+            cmd = [str(venv_python), str(script_path)]
+        else:
+            cmd = [sys.executable, str(script_path)]
+        env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
+    
     # Run the migration script
     result = subprocess.run(
-        [sys.executable, str(script_path)],
+        cmd,
         cwd=str(PROJECT_ROOT),
-        env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
+        env=env,
         capture_output=True,
         text=True,
     )

@@ -207,17 +207,23 @@ class JoinGameResponse(GameWithUnitsResponse):
 
 # --- Helper Functions ---
 
-async def get_game_by_code(session: AsyncSession, code: str) -> Game:
+async def get_game_by_code(session: AsyncSession, code: str, load_attached_heroes: bool = False) -> Game:
     """Fetch game by join code with relationships loaded."""
     stmt = (
         select(Game)
         .where(Game.code == code.upper())
         .options(
             selectinload(Game.players).selectinload(Player.units).selectinload(Unit.state),
-            selectinload(Game.players).selectinload(Player.units).selectinload(Unit.attached_heroes),
             selectinload(Game.objectives),
         )
     )
+    # Only eagerly load attached_heroes if explicitly requested
+    # This allows the code to work even if migrations haven't run yet
+    if load_attached_heroes:
+        stmt = stmt.options(
+            selectinload(Game.players).selectinload(Player.units).selectinload(Unit.attached_heroes)
+        )
+    
     result = await session.execute(stmt)
     game = result.scalar_one_or_none()
     if not game:
@@ -519,7 +525,7 @@ class GamesController(Controller):
         session: AsyncSession,
     ) -> UnitResponse:
         """Update a unit's game state."""
-        game = await get_game_by_code(session, code)
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
         
         # Find the unit
         unit = None
@@ -654,6 +660,28 @@ class GamesController(Controller):
                     player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
+            
+            # Sync shaken status to attached heroes (they share status with parent)
+            if unit.attached_heroes:
+                for attached_hero in unit.attached_heroes:
+                    if attached_hero.state and attached_hero.state.is_shaken != data.is_shaken:
+                        attached_hero.state.is_shaken = data.is_shaken
+                        if data.is_shaken:
+                            await log_event(
+                                session, game,
+                                EventType.STATUS_SHAKEN,
+                                f"{attached_hero.display_name} became Shaken (attached to {unit.display_name})",
+                                player_id=attached_hero.player_id,
+                                target_unit_id=attached_hero.id,
+                            )
+                        else:
+                            await log_event(
+                                session, game,
+                                EventType.STATUS_SHAKEN_CLEARED,
+                                f"{attached_hero.display_name} is no longer Shaken (attached to {unit.display_name})",
+                                player_id=attached_hero.player_id,
+                                target_unit_id=attached_hero.id,
+                            )
         
         if data.is_fatigued is not None:
             unit.state.is_fatigued = data.is_fatigued
@@ -779,7 +807,7 @@ class GamesController(Controller):
         session: AsyncSession,
     ) -> UnitResponse:
         """Detach a hero unit from its parent unit."""
-        game = await get_game_by_code(session, code)
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
         
         # Find the unit
         unit = None
