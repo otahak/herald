@@ -30,6 +30,18 @@ logger = logging.getLogger("Herald")
 logger.info(f"Starting app in {'DEBUG' if DEBUG else 'PRODUCTION'} mode")
 logger.info(f"Database URL: {DATABASE_URL}")
 
+# Check OAuth environment variables at startup
+from os import getenv
+google_client_id = getenv("GOOGLE_CLIENT_ID")
+google_client_secret = getenv("GOOGLE_CLIENT_SECRET")
+if google_client_id and google_client_secret:
+    logger.info("✓ OAuth environment variables are present in environment")
+    logger.debug(f"GOOGLE_CLIENT_ID length: {len(google_client_id)}, GOOGLE_CLIENT_SECRET length: {len(google_client_secret)}")
+else:
+    logger.warning("⚠ OAuth environment variables NOT found in environment")
+    logger.warning(f"GOOGLE_CLIENT_ID present: {bool(google_client_id)}, GOOGLE_CLIENT_SECRET present: {bool(google_client_secret)}")
+    logger.warning("This usually means the .env file is not being loaded by systemd, or the .env file has formatting issues")
+
 # --- SQLAlchemy config
 config = SQLAlchemyAsyncConfig(
     connection_string=DATABASE_URL,

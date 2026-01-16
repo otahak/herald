@@ -229,6 +229,15 @@ jobs:
               fi
             fi
             
+            # Verify .env file format one more time before restart
+            echo "Final .env file verification..."
+            echo "First 3 lines of .env file (showing format):"
+            head -3 /opt/herald/.env | cat -A || true
+            if grep -q "^[[:space:]]" /opt/herald/.env; then
+              echo "ERROR: .env file STILL has leading spaces after fix attempt!"
+              exit 1
+            fi
+            
             # Reload systemd to pick up any .env changes, then restart service
             echo "Reloading systemd and restarting Herald service..."
             sudo systemctl daemon-reload
@@ -239,11 +248,15 @@ jobs:
             
             # Verify environment variables are loaded by checking service environment
             echo "=== Verifying Environment Variables ==="
-            if sudo systemctl show herald | grep -q "GOOGLE_CLIENT_ID="; then
+            SERVICE_ENV=$(sudo systemctl show herald --property=Environment --property=EnvironmentFile 2>/dev/null || echo "")
+            if echo "$SERVICE_ENV" | grep -q "GOOGLE_CLIENT_ID="; then
               echo "✓ GOOGLE_CLIENT_ID is loaded in service environment"
             else
               echo "⚠ WARNING: GOOGLE_CLIENT_ID not found in service environment"
-              echo "This may indicate the .env file is not being read correctly"
+              echo "Service EnvironmentFile: $(echo "$SERVICE_ENV" | grep EnvironmentFile || echo 'not found')"
+              echo "This may indicate the .env file is not being read correctly by systemd"
+              echo "Checking if .env file exists and is readable:"
+              ls -la /opt/herald/.env || echo ".env file not found!"
             fi
             
             # Check service status
