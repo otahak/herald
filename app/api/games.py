@@ -207,17 +207,23 @@ class JoinGameResponse(GameWithUnitsResponse):
 
 # --- Helper Functions ---
 
-async def get_game_by_code(session: AsyncSession, code: str) -> Game:
+async def get_game_by_code(session: AsyncSession, code: str, load_attached_heroes: bool = False) -> Game:
     """Fetch game by join code with relationships loaded."""
     stmt = (
         select(Game)
         .where(Game.code == code.upper())
         .options(
             selectinload(Game.players).selectinload(Player.units).selectinload(Unit.state),
-            selectinload(Game.players).selectinload(Player.units).selectinload(Unit.attached_heroes),
             selectinload(Game.objectives),
         )
     )
+    # Only eagerly load attached_heroes if explicitly requested
+    # This allows the code to work even if migrations haven't run yet
+    if load_attached_heroes:
+        stmt = stmt.options(
+            selectinload(Game.players).selectinload(Player.units).selectinload(Unit.attached_heroes)
+        )
+    
     result = await session.execute(stmt)
     game = result.scalar_one_or_none()
     if not game:
@@ -519,7 +525,7 @@ class GamesController(Controller):
         session: AsyncSession,
     ) -> UnitResponse:
         """Update a unit's game state."""
-        game = await get_game_by_code(session, code)
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
         
         # Find the unit
         unit = None
@@ -779,7 +785,7 @@ class GamesController(Controller):
         session: AsyncSession,
     ) -> UnitResponse:
         """Detach a hero unit from its parent unit."""
-        game = await get_game_by_code(session, code)
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
         
         # Find the unit
         unit = None
