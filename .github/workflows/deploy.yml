@@ -51,6 +51,20 @@ jobs:
               uv sync --frozen --no-dev
             EOF
             
+            # Run database migrations
+            echo "Running database migrations..."
+            sudo -u herald bash << 'EOF'
+              cd /opt/herald
+              export PATH="/usr/local/bin:$PATH"
+              # Load DATABASE_URL from .env if it exists, otherwise use default
+              if [ -f /opt/herald/.env ]; then
+                export $(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs)
+              fi
+              # Fallback if still not set
+              export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald}"
+              python3 deploy/run_migrations.py
+            EOF
+            
             # Restart service
             echo "Restarting Herald service..."
             sudo systemctl restart herald
