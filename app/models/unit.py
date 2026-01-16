@@ -72,8 +72,26 @@ class Unit(Base):
     has_ambush: Mapped[bool] = mapped_column(Boolean, default=False)
     has_scout: Mapped[bool] = mapped_column(Boolean, default=False)
     
+    # Unit attachment (for heroes attached to other units)
+    attached_to_unit_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("units.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
     # Relationships
     player: Mapped["Player"] = relationship("Player", back_populates="units")
+    attached_to_unit: Mapped[Optional["Unit"]] = relationship(
+        "Unit",
+        remote_side="Unit.id",
+        foreign_keys=[attached_to_unit_id],
+        back_populates="attached_heroes",
+    )
+    attached_heroes: Mapped[List["Unit"]] = relationship(
+        "Unit",
+        foreign_keys=[attached_to_unit_id],
+        back_populates="attached_to_unit",
+    )
     state: Mapped[Optional["UnitState"]] = relationship(
         "UnitState",
         back_populates="unit",

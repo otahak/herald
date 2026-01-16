@@ -278,3 +278,431 @@ async def test_wound_tracking_creates_individual_events(client):
     # Note: Testing the 30-second threshold for heal detection would require
     # time manipulation, which is better suited for integration tests
 
+
+@pytest.mark.asyncio
+async def test_attached_units_cannot_activate_separately(client):
+    """Test that attached heroes cannot be activated separately."""
+    # Create game and import units with attachments
+    resp = await client.post(
+        "/api/games",
+        json={"name": "AttachTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import units with attachment relationship
+    fake_units = [
+        {
+            "name": "Parent Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 200,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Attached Hero",
+            "quality": 3,
+            "defense": 3,
+            "size": 1,
+            "cost": 50,
+            "rules": [{"name": "Hero"}],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+            "joinToUnit": "s1",  # Attached to parent
+        }
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the units
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    
+    # Find the attached hero
+    attached_hero = next((u for u in units if u.get("name") == "Attached Hero"), None)
+    assert attached_hero is not None
+    assert attached_hero.get("attached_to_unit_id") is not None
+    
+    # Try to activate the attached hero directly - should fail
+    resp_activate = await client.patch(
+        f"/api/games/{code}/units/{attached_hero['id']}",
+        json={"activated_this_round": True},
+    )
+    assert resp_activate.status_code in (400, 422)
+    assert "attached" in resp_activate.json().get("detail", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_activating_parent_activates_attached_heroes(client):
+    """Test that activating a parent unit also activates attached heroes."""
+    # Create game and import units with attachments
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ActivateTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Start game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Import units with attachment
+    fake_units = [
+        {
+            "name": "Parent Squad",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 200,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Hero",
+            "quality": 3,
+            "defense": 3,
+            "size": 1,
+            "cost": 50,
+            "rules": [{"name": "Hero"}],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+            "joinToUnit": "s1",
+        }
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the units
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    
+    parent_unit = next((u for u in units if u.get("name") == "Parent Squad"), None)
+    hero_unit = next((u for u in units if u.get("name") == "Hero"), None)
+    
+    assert parent_unit is not None
+    assert hero_unit is not None
+    assert hero_unit.get("attached_to_unit_id") == parent_unit["id"]
+    
+    # Activate the parent unit
+    resp_activate = await client.patch(
+        f"/api/games/{code}/units/{parent_unit['id']}",
+        json={"activated_this_round": True},
+    )
+    assert resp_activate.status_code == 200
+    
+    # Check events - should have activation events for both
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    activation_events = [e for e in events if e["event_type"] == "unit_activated"]
+    
+    # Should have at least 2 activation events (parent + hero)
+    assert len(activation_events) >= 2
+    activated_unit_ids = {e.get("target_unit_id") for e in activation_events}
+    assert parent_unit["id"] in activated_unit_ids
+    assert hero_unit["id"] in activated_unit_ids
+    
+    # Verify hero is also activated
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    hero_unit2 = next((u for u in units2 if u.get("id") == hero_unit["id"]), None)
+    assert hero_unit2 is not None
+    assert hero_unit2.get("state", {}).get("activated_this_round") is True
+
+
+@pytest.mark.asyncio
+async def test_manual_detachment(client):
+    """Test manual detachment of attached heroes."""
+    # Create game and import units with attachments
+    resp = await client.post(
+        "/api/games",
+        json={"name": "DetachTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import units with attachment
+    fake_units = [
+        {
+            "name": "Parent",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 200,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Hero",
+            "quality": 3,
+            "defense": 3,
+            "size": 1,
+            "cost": 50,
+            "rules": [{"name": "Hero"}],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+            "joinToUnit": "s1",
+        }
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the hero unit
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    hero_unit = next((u for u in units if u.get("name") == "Hero"), None)
+    assert hero_unit is not None
+    assert hero_unit.get("attached_to_unit_id") is not None
+    
+    # Detach the hero
+    resp_detach = await client.patch(
+        f"/api/games/{code}/units/{hero_unit['id']}/detach",
+    )
+    assert resp_detach.status_code == 200
+    
+    # Verify hero is detached
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    hero_unit2 = next((u for u in units2 if u.get("id") == hero_unit["id"]), None)
+    assert hero_unit2 is not None
+    assert hero_unit2.get("attached_to_unit_id") is None
+    
+    # Check for detachment event
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    detach_events = [e for e in events if e["event_type"] == "unit_detached"]
+    assert len(detach_events) > 0
+    assert any(e.get("target_unit_id") == hero_unit["id"] for e in detach_events)
+
+
+@pytest.mark.asyncio
+async def test_automatic_detachment_on_destroy(client):
+    """Test that attached heroes are automatically detached when parent is destroyed."""
+    # Create game and import units with attachments
+    resp = await client.post(
+        "/api/games",
+        json={"name": "DestroyTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import units with attachment
+    fake_units = [
+        {
+            "name": "Parent Squad",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 200,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Elite Hero",
+            "quality": 3,
+            "defense": 3,
+            "size": 1,
+            "cost": 50,
+            "rules": [{"name": "Hero"}],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+            "joinToUnit": "s1",
+        }
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the units
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    
+    parent_unit = next((u for u in units if u.get("name") == "Parent Squad"), None)
+    hero_unit = next((u for u in units if u.get("name") == "Elite Hero"), None)
+    
+    assert parent_unit is not None
+    assert hero_unit is not None
+    assert hero_unit.get("attached_to_unit_id") == parent_unit["id"]
+    
+    # Destroy the parent unit
+    resp_destroy = await client.patch(
+        f"/api/games/{code}/units/{parent_unit['id']}",
+        json={"deployment_status": "destroyed"},
+    )
+    assert resp_destroy.status_code == 200
+    
+    # Verify hero is detached
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    hero_unit2 = next((u for u in units2 if u.get("id") == hero_unit["id"]), None)
+    assert hero_unit2 is not None
+    assert hero_unit2.get("attached_to_unit_id") is None
+    
+    # Check for detachment and destroy events
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    destroy_events = [e for e in events if e["event_type"] == "unit_destroyed"]
+    detach_events = [e for e in events if e["event_type"] == "unit_detached"]
+    
+    assert len(destroy_events) > 0
+    assert any(e.get("target_unit_id") == parent_unit["id"] for e in destroy_events)
+    assert len(detach_events) > 0
+    assert any(e.get("target_unit_id") == hero_unit["id"] for e in detach_events)
+
+
+@pytest.mark.asyncio
+async def test_shaken_unshaken_logging(client):
+    """Test that shaken/unshaken state changes are logged."""
+    # Create game and import a unit
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ShakenTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import a unit
+    fake_units = [{
+        "name": "Test Unit",
+        "quality": 4,
+        "defense": 4,
+        "size": 1,
+        "cost": 100,
+        "rules": [],
+        "selectedUpgrades": [],
+        "id": "u1",
+        "selectionId": "s1",
+    }]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+        )
+    
+    # Get the unit
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    unit_id = units[0]["id"]
+    
+    # Set unit to shaken
+    resp_shaken = await client.patch(
+        f"/api/games/{code}/units/{unit_id}",
+        json={"is_shaken": True},
+    )
+    assert resp_shaken.status_code == 200
+    
+    # Check for shaken event
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    shaken_events = [e for e in events if e["event_type"] == "status_shaken"]
+    assert len(shaken_events) > 0
+    assert any(e.get("target_unit_id") == unit_id for e in shaken_events)
+    
+    # Clear shaken status
+    resp_unshaken = await client.patch(
+        f"/api/games/{code}/units/{unit_id}",
+        json={"is_shaken": False},
+    )
+    assert resp_unshaken.status_code == 200
+    
+    # Check for shaken cleared event
+    resp_events2 = await client.get(f"/api/games/{code}/events")
+    events2 = resp_events2.json()
+    cleared_events = [e for e in events2 if e["event_type"] == "status_shaken_cleared"]
+    assert len(cleared_events) > 0
+    assert any(e.get("target_unit_id") == unit_id for e in cleared_events)
+

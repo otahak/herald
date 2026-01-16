@@ -78,18 +78,60 @@ class ImportArmyResponse(BaseModel):
 
 def extract_list_id(url_or_id: str) -> str:
     """Extract list ID from Army Forge share URL or raw ID."""
-    # If it's already just an ID
+    if not url_or_id or not isinstance(url_or_id, str):
+        raise ValidationException("Invalid Army Forge URL or ID provided")
+    
+    # Clean up the input - remove any whitespace
+    url_or_id = url_or_id.strip()
+    
+    # Check if it looks like console output or error text (common patterns)
+    if any(indicator in url_or_id.lower() for indicator in [
+        'vue.global.js',
+        'console',
+        'error',
+        'warn',
+        'traceback',
+        'exception',
+        'uncaught',
+        'typeerror',
+        'cannot read',
+        'property',
+        'undefined',
+        'null',
+    ]):
+        raise ValidationException(
+            "Invalid input detected. Please paste the Army Forge share URL or list ID, not console output. "
+            "Example: https://army-forge.onepagerules.com/share?id=XXXXX"
+        )
+    
+    # If it's already just an ID (alphanumeric with dashes/underscores, reasonable length)
     if not url_or_id.startswith("http"):
-        return url_or_id
+        # Validate it looks like a reasonable ID (alphanumeric, dashes, underscores, 5-50 chars)
+        if re.match(r'^[a-zA-Z0-9_-]{5,50}$', url_or_id):
+            return url_or_id
+        else:
+            raise ValidationException(
+                f"Invalid list ID format. Expected alphanumeric characters, dashes, or underscores. "
+                f"Got: {url_or_id[:50]}..."
+            )
     
     # Try to extract from URL
     # Format: https://army-forge.onepagerules.com/share?id=XXXXX
     # Or: https://army-forge.onepagerules.com/listbuilder/share/XXXXX
     match = re.search(r'(?:id=|share/)([a-zA-Z0-9_-]+)', url_or_id)
     if match:
-        return match.group(1)
+        list_id = match.group(1)
+        # Validate the extracted ID
+        if len(list_id) < 5 or len(list_id) > 50:
+            raise ValidationException(f"Extracted list ID has invalid length: {len(list_id)} characters")
+        return list_id
     
-    raise ValidationException(f"Could not extract list ID from: {url_or_id}")
+    raise ValidationException(
+        f"Could not extract list ID from the provided input. "
+        f"Please provide either:\n"
+        f"- A full Army Forge share URL (e.g., https://army-forge.onepagerules.com/share?id=XXXXX)\n"
+        f"- Or just the list ID (alphanumeric string)"
+    )
 
 
 def parse_special_rules(rules: List[dict]) -> dict:
@@ -286,6 +328,10 @@ class ProxyController(Controller):
         
         logger.info(f"Processing {len(units_data)} units from Army Forge")
         
+        # First pass: Create all units and build a mapping of selectionId -> unit
+        selection_id_to_unit: dict[str, Unit] = {}
+        unit_data_with_attachments: list[tuple[dict, Unit]] = []
+        
         for unit_data in units_data:
             try:
                 # Parse special rules
@@ -321,6 +367,15 @@ class ProxyController(Controller):
                 session.add(unit)
                 await session.flush()  # Get unit ID
                 
+                # Store mapping for attachment linking
+                selection_id = unit_data.get("selectionId")
+                if selection_id:
+                    selection_id_to_unit[selection_id] = unit
+                
+                # Store units with joinToUnit for second pass
+                if unit_data.get("joinToUnit"):
+                    unit_data_with_attachments.append((unit_data, unit))
+                
                 # Create initial state
                 initial_deployment = (
                     DeploymentStatus.IN_AMBUSH if props["has_ambush"]
@@ -340,6 +395,16 @@ class ProxyController(Controller):
                 logger.error(f"Error creating unit '{unit_data.get('name', 'Unknown')}': {str(e)}")
                 raise ValidationException(f"Failed to import unit '{unit_data.get('name', 'Unknown')}': {str(e)}")
             units_created += 1
+        
+        # Second pass: Link attached heroes to their parent units
+        for unit_data, attached_unit in unit_data_with_attachments:
+            join_to_selection_id = unit_data.get("joinToUnit")
+            if join_to_selection_id and join_to_selection_id in selection_id_to_unit:
+                parent_unit = selection_id_to_unit[join_to_selection_id]
+                attached_unit.attached_to_unit_id = parent_unit.id
+                logger.debug(f"Linked {attached_unit.name} to {parent_unit.name}")
+            else:
+                logger.warning(f"Could not find parent unit with selectionId '{join_to_selection_id}' for attached unit '{attached_unit.name}'")
         
         # Store values for response before any commits
         player_name = player.name

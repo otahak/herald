@@ -139,6 +139,7 @@ class UnitResponse(BaseModel):
     transport_capacity: int
     has_ambush: bool
     has_scout: bool
+    attached_to_unit_id: Optional[uuid.UUID] = None
     state: Optional[UnitStateResponse]
     
     class Config:
@@ -213,6 +214,7 @@ async def get_game_by_code(session: AsyncSession, code: str) -> Game:
         .where(Game.code == code.upper())
         .options(
             selectinload(Game.players).selectinload(Player.units).selectinload(Unit.state),
+            selectinload(Game.players).selectinload(Player.units).selectinload(Unit.attached_heroes),
             selectinload(Game.objectives),
         )
     )
@@ -604,6 +606,13 @@ class GamesController(Controller):
             unit.state.models_remaining = data.models_remaining
         
         if data.activated_this_round is not None and data.activated_this_round != unit.state.activated_this_round:
+            # Prevent activating attached heroes separately
+            if data.activated_this_round and unit.attached_to_unit_id:
+                raise ValidationException(
+                    f"{unit.display_name} is attached to another unit and cannot be activated separately. "
+                    f"Activate the parent unit instead."
+                )
+            
             unit.state.activated_this_round = data.activated_this_round
             if data.activated_this_round:
                 await log_event(
@@ -613,6 +622,19 @@ class GamesController(Controller):
                     player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
+                
+                # When activating a unit, also activate any attached heroes
+                if unit.attached_heroes:
+                    for attached_hero in unit.attached_heroes:
+                        if attached_hero.state and not attached_hero.state.activated_this_round:
+                            attached_hero.state.activated_this_round = True
+                            await log_event(
+                                session, game,
+                                EventType.UNIT_ACTIVATED,
+                                f"{attached_hero.display_name} activated (attached to {unit.display_name})",
+                                player_id=attached_hero.player_id,
+                                target_unit_id=attached_hero.id,
+                            )
         
         if data.is_shaken is not None and data.is_shaken != unit.state.is_shaken:
             unit.state.is_shaken = data.is_shaken
@@ -621,6 +643,7 @@ class GamesController(Controller):
                     session, game,
                     EventType.STATUS_SHAKEN,
                     f"{unit.display_name} became Shaken",
+                    player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
             else:
@@ -628,6 +651,7 @@ class GamesController(Controller):
                     session, game,
                     EventType.STATUS_SHAKEN_CLEARED,
                     f"{unit.display_name} is no longer Shaken",
+                    player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
         
@@ -659,6 +683,19 @@ class GamesController(Controller):
                     f"{unit.display_name} was destroyed",
                     target_unit_id=unit.id,
                 )
+                
+                # Automatically detach any attached heroes when parent is destroyed
+                # Heroes may survive as independent units
+                if unit.attached_heroes:
+                    for attached_hero in unit.attached_heroes:
+                        attached_hero.attached_to_unit_id = None
+                        await log_event(
+                            session, game,
+                            EventType.UNIT_DETACHED,
+                            f"{attached_hero.display_name} detached from {unit.display_name} (parent destroyed)",
+                            player_id=attached_hero.player_id,
+                            target_unit_id=attached_hero.id,
+                        )
         
         if data.transport_id is not None:
             old_transport = unit.state.transport_id
@@ -728,6 +765,65 @@ class GamesController(Controller):
             "type": "state_update",
             "data": {
                 "reason": "unit_updated",
+                "unit_id": str(unit_id),
+            }
+        })
+        
+        return UnitResponse.model_validate(unit)
+    
+    @patch("/{code:str}/units/{unit_id:uuid}/detach")
+    async def detach_unit(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> UnitResponse:
+        """Detach a hero unit from its parent unit."""
+        game = await get_game_by_code(session, code)
+        
+        # Find the unit
+        unit = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        
+        if not unit.attached_to_unit_id:
+            raise ValidationException(f"{unit.display_name} is not attached to any unit")
+        
+        # Find parent unit for logging
+        parent_unit = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit.attached_to_unit_id:
+                    parent_unit = u
+                    break
+        
+        parent_name = parent_unit.display_name if parent_unit else "unknown unit"
+        
+        # Detach the unit
+        unit.attached_to_unit_id = None
+        
+        await log_event(
+            session, game,
+            EventType.UNIT_DETACHED,
+            f"{unit.display_name} detached from {parent_name}",
+            player_id=unit.player_id,
+            target_unit_id=unit.id,
+        )
+        
+        await session.commit()
+        await session.refresh(unit)
+        
+        # Broadcast state update
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "unit_detached",
                 "unit_id": str(unit_id),
             }
         })
