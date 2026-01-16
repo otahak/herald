@@ -8,3 +8,6 @@ from litestar.response import Template
 def feedback_page() -> Template:
     """Feedback form page."""
     return Template(template_name="feedback/feedback.html")
+
+
+routes = [feedback_page]

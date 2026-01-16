@@ -9,8 +9,7 @@ User=herald
 Group=herald
 WorkingDirectory=/opt/herald
 Environment="PATH=/opt/herald/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="DATABASE_URL=postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
-Environment="APP_DEBUG=false"
+EnvironmentFile=/opt/herald/.env
 ExecStart=/opt/herald/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --root-path /herald
 Restart=always
 RestartSec=10

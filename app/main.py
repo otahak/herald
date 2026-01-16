@@ -6,8 +6,9 @@ from litestar import Litestar, Request
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemyInitPlugin, SQLAlchemyAsyncConfig
 from litestar.contrib.jinja import JinjaTemplateEngine
 from litestar.template.config import TemplateConfig
-from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
-from litestar.response import Response
+from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_401_UNAUTHORIZED
+from litestar.response import Response, Redirect
+from litestar.exceptions import NotAuthorizedException
 
 from app.routes import ROUTES
 from app.models import Base  # Import models Base for table creation
@@ -56,11 +57,28 @@ def log_exceptions(request: Request, exc: Exception) -> Response:
         media_type="application/json"
     )
 
+
+# --- Auth exception handler
+def handle_auth_exception(request: Request, exc: NotAuthorizedException) -> Response:
+    """Handle authentication failures by redirecting to login."""
+    from litestar.response import Redirect
+    # Only redirect for admin routes
+    if request.url.path.startswith("/admin") or request.url.path.startswith("/api/admin"):
+        return Redirect("/admin/login-page")
+    return Response(
+        content={"detail": "Not authorized"},
+        status_code=HTTP_401_UNAUTHORIZED,
+        media_type="application/json"
+    )
+
 # --- App init
 app = Litestar(
     route_handlers=ROUTES,
     debug=DEBUG,
     plugins=[plugin],
     template_config=template_config,
-    exception_handlers={Exception: log_exceptions}
+    exception_handlers={
+        Exception: log_exceptions,
+        NotAuthorizedException: handle_auth_exception,
+    }
 )

@@ -1,13 +1,12 @@
 """Feedback API endpoints."""
 
 import logging
-from datetime import datetime
-from typing import Optional
 
 from litestar import Controller, post
-from litestar.exceptions import ValidationException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.feedback import Feedback
 
 logger = logging.getLogger("Herald.feedback")
 
@@ -44,14 +43,17 @@ class FeedbackController(Controller):
         """Submit user feedback."""
         logger.info(f"Feedback submitted from {data.email} ({data.name})")
         
-        # Log the feedback (for now, we'll just log it)
-        # In the future, you could store it in a database table
-        logger.info(f"Feedback details:\nName: {data.name}\nEmail: {data.email}\nMessage: {data.message}")
+        # Save feedback to database
+        feedback = Feedback(
+            name=data.name,
+            email=str(data.email),  # EmailStr to string
+            message=data.message,
+            read=False,
+        )
+        session.add(feedback)
+        await session.commit()
         
-        # TODO: In the future, you might want to:
-        # 1. Store feedback in a database table
-        # 2. Send an email notification
-        # 3. Create a ticket in an issue tracker
+        logger.info(f"Feedback saved to database with ID: {feedback.id}")
         
         return FeedbackResponse(
             success=True,
