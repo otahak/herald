@@ -74,7 +74,14 @@ async def main():
         # Show connection details without password
         parts = database_url.split("@")
         if len(parts) == 2:
-            print(f"  Connection: {parts[0].split('//')[0]}//***@{parts[1]}")
+            conn_part = parts[0].split('//')[0]
+            host_part = parts[1].split('/')[0]  # host:port
+            db_part = parts[1].split('/')[1] if '/' in parts[1] else 'unknown'
+            print(f"  Connection: {conn_part}//***@{host_part}/{db_part}")
+            # Extract hostname for DNS check
+            hostname = host_part.split(':')[0]
+            print(f"  Hostname: {hostname}")
+            print(f"  Database: {db_part}")
         else:
             print(f"  Connection: {database_url[:50]}...")
     else:
