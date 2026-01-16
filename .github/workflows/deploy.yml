@@ -89,13 +89,13 @@ jobs:
           fi
           
           # Create .env file content locally (no leading spaces for systemd compatibility)
-          cat > /tmp/herald.env << EOF
-DATABASE_URL=$DATABASE_URL
-GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
-GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
-GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL
-APP_DEBUG=$APP_DEBUG
-EOF
+          {
+            echo "DATABASE_URL=$DATABASE_URL"
+            echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
+            echo "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET"
+            echo "GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL"
+            echo "APP_DEBUG=$APP_DEBUG"
+          } > /tmp/herald.env
           
           # Verify .env file was created correctly (check non-empty values)
           if ! grep -q "DATABASE_URL=.*[^[:space:]]" /tmp/herald.env; then
