@@ -70,44 +70,61 @@ async def get_oauth_client(request: Request) -> AsyncOAuth2Client:
 
 async def admin_login(request: Request) -> Redirect:
     """Initiate Google OAuth login."""
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        logger.error("Google OAuth credentials not configured")
-        raise NotAuthorizedException("OAuth not configured")
-    
-    # Generate state token for CSRF protection
-    state = secrets.token_urlsafe(32)
-    
-    # Store state in session
-    session_id = request.cookies.get("session_id")
-    if not session_id:
-        session_id = secrets.token_urlsafe(32)
-    
-    await session_store.set(f"oauth_state:{session_id}", state, expires_in=600)  # 10 min expiry
-    
-    # Build authorization URL
-    client = await get_oauth_client(request)
-    auth_url, _ = client.create_authorization_url(
-        GOOGLE_AUTHORIZATION_BASE_URL,
-        state=state,
-        scope="openid email profile",
-    )
-    
-    response = Redirect(auth_url)
-    # Always set the cookie to ensure it's sent back
-    # Use secure=False for localhost, secure=True for production
-    is_secure = request.url.scheme == "https" or (request.url.hostname and "otahak.com" in request.url.hostname)
-    response.set_cookie(
-        "session_id", 
-        session_id, 
-        httponly=True, 
-        secure=is_secure, 
-        samesite="lax",
-        path="/"  # Make sure cookie is available for the entire site
-    )
-    
-    logger.debug(f"Set session_id cookie: {session_id[:8]}... for redirect to Google")
-    
-    return response
+    try:
+        logger.info(f"Admin login initiated from {request.url}")
+        
+        if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+            logger.error("Google OAuth credentials not configured")
+            raise NotAuthorizedException("OAuth not configured")
+        
+        # Generate state token for CSRF protection
+        state = secrets.token_urlsafe(32)
+        logger.debug(f"Generated OAuth state token: {state[:16]}...")
+        
+        # Store state in session
+        session_id = request.cookies.get("session_id")
+        if not session_id:
+            session_id = secrets.token_urlsafe(32)
+            logger.debug(f"Generated new session_id: {session_id[:16]}...")
+        else:
+            logger.debug(f"Using existing session_id: {session_id[:16]}...")
+        
+        await session_store.set(f"oauth_state:{session_id}", state, expires_in=600)  # 10 min expiry
+        logger.debug(f"Stored OAuth state in session store")
+        
+        # Build authorization URL
+        redirect_uri = get_redirect_uri(request)
+        logger.info(f"OAuth redirect URI: {redirect_uri}")
+        
+        client = await get_oauth_client(request)
+        auth_url, _ = client.create_authorization_url(
+            GOOGLE_AUTHORIZATION_BASE_URL,
+            state=state,
+            scope="openid email profile",
+        )
+        
+        logger.info(f"Created OAuth authorization URL, redirecting to Google")
+        logger.debug(f"Authorization URL: {auth_url[:100]}...")
+        
+        response = Redirect(auth_url)
+        # Always set the cookie to ensure it's sent back
+        # Use secure=False for localhost, secure=True for production
+        is_secure = request.url.scheme == "https" or (request.url.hostname and "otahak.com" in request.url.hostname)
+        response.set_cookie(
+            "session_id", 
+            session_id, 
+            httponly=True, 
+            secure=is_secure, 
+            samesite="lax",
+            path="/"  # Make sure cookie is available for the entire site
+        )
+        
+        logger.debug(f"Set session_id cookie: {session_id[:8]}... for redirect to Google")
+        
+        return response
+    except Exception as e:
+        logger.exception(f"Error in admin_login: {e}")
+        raise
 
 
 async def admin_callback(request: Request) -> Redirect | Response:
