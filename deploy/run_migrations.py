@@ -44,22 +44,17 @@ def load_env_file():
                     if not line or line.startswith("#"):
                         continue
                     # Parse KEY=VALUE format
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    key = key.strip()
-                    # Remove quotes from value if present
-                    value = value.strip()
-                    if value.startswith('"') and value.endswith('"'):
-                        value = value[1:-1]
-                    elif value.startswith("'") and value.endswith("'"):
-                        value = value[1:-1]
-                    # Skip empty values (but still store them to show they were found)
-                    if value:
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        key = key.strip()
+                        # Remove quotes from value if present
+                        value = value.strip()
+                        if value.startswith('"') and value.endswith('"'):
+                            value = value[1:-1]
+                        elif value.startswith("'") and value.endswith("'"):
+                            value = value[1:-1]
+                        # Store the value (even if empty, so we know it exists)
                         env_vars[key] = value
-                    else:
-                        # Empty value - this is a problem
-                        print(f"  WARNING: {key} is empty in .env file!")
-                        env_vars[key] = value  # Store empty string so we know it exists but is empty
                         # Don't print sensitive values, but show we loaded them
                         if key == "DATABASE_URL":
                             # Show first and last few chars for debugging
@@ -68,6 +63,9 @@ def load_env_file():
                                 print(f"  Loaded {key} = {db_url[:20]}...{db_url[-10:]}")
                             else:
                                 print(f"  Loaded {key} = (hidden, length: {len(db_url)})")
+                            # Check if empty
+                            if not db_url:
+                                print(f"  WARNING: {key} is empty in .env file!")
                         else:
                             print(f"  Loaded {key}")
         except Exception as e:
