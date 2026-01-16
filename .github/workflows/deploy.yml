@@ -55,7 +55,7 @@ jobs:
             
             # Run database migrations
             echo "Running database migrations..."
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:\$PATH\" && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && python3 deploy/run_migrations.py"
+            su herald -s /bin/bash -c "cd /opt/herald && source ~/.bashrc 2>/dev/null || true && source ~/.profile 2>/dev/null || true && export PATH=\"/usr/local/bin:/root/.cargo/bin:/home/herald/.cargo/bin:\$PATH\" && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && uv run python deploy/run_migrations.py"
             
             # Restart service
             echo "Restarting Herald service..."
