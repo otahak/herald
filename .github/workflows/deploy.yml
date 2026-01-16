@@ -46,15 +46,31 @@ jobs:
             # Update dependencies
             echo "Updating dependencies..."
             # The service uses .venv/bin/uvicorn, so .venv should exist
-            # Just ensure pip is up to date and install the package
-            # Skip uv entirely - use pip directly from the venv
+            # If it doesn't, create it using uv
             if [ -d "/opt/herald/.venv" ] && [ -f "/opt/herald/.venv/bin/pip" ]; then
-              echo "Updating dependencies using venv pip..."
+              echo "Updating dependencies using existing venv..."
               su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/pip install --upgrade pip && /opt/herald/.venv/bin/pip install -e ."
             else
-              echo "ERROR: Virtual environment not found at /opt/herald/.venv"
-              echo "This should not happen - the service requires .venv to exist."
-              echo "Skipping dependency update - service may fail to start."
+              echo "WARNING: .venv not found. Attempting to create it..."
+              # Try to find uv to create venv
+              UV_CMD=""
+              for path in /usr/local/bin/uv /root/.cargo/bin/uv /home/herald/.cargo/bin/uv; do
+                if [ -f "$path" ]; then
+                  chmod +x "$path" 2>/dev/null || true
+                  if [ -x "$path" ]; then
+                    UV_CMD="$path"
+                    break
+                  fi
+                fi
+              done
+              if [ -n "$UV_CMD" ]; then
+                echo "Found uv at: $UV_CMD, creating venv..."
+                su herald -s /bin/bash -c "cd /opt/herald && $UV_CMD sync --frozen --no-dev"
+              else
+                echo "ERROR: Cannot create venv - uv not found and .venv doesn't exist"
+                echo "Service will likely fail to start. Manual intervention required."
+                exit 1
+              fi
             fi
             
             # Run database migrations
