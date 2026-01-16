@@ -45,30 +45,38 @@ jobs:
             
             # Update dependencies
             echo "Updating dependencies..."
-            # Find uv - check common locations as root first
-            UV_PATH=""
-            for path in "/usr/local/bin/uv" "/root/.cargo/bin/uv" "/home/herald/.cargo/bin/uv" "/usr/bin/uv"; do
-              if [ -f "$path" ]; then
-                chmod +x "$path" 2>/dev/null || true
-                UV_PATH="$path"
-                break
+            # Use the venv python directly - uv should have created .venv during initial setup
+            # If .venv doesn't exist, we'll need to create it, but for now assume it exists
+            if [ -d "/opt/herald/.venv" ]; then
+              echo "Using existing virtual environment..."
+              su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/python -m pip install --upgrade pip && /opt/herald/.venv/bin/pip install -e ."
+            else
+              echo "Virtual environment not found. Attempting to use uv..."
+              # Try to find and use uv, or install dependencies manually
+              UV_CMD=$(find /usr/local /root/.cargo /home/herald/.cargo -name uv -type f -executable 2>/dev/null | head -1)
+              if [ -n "$UV_CMD" ]; then
+                echo "Found uv at: $UV_CMD"
+                su herald -s /bin/bash -c "cd /opt/herald && $UV_CMD sync --frozen --no-dev"
+              else
+                echo "ERROR: uv not found and .venv doesn't exist. Cannot update dependencies."
+                exit 1
               fi
-            done
-            # If still not found, try which as root
-            if [ -z "$UV_PATH" ]; then
-              UV_PATH=$(which uv 2>/dev/null || echo "")
             fi
-            # Fallback to just 'uv' and let PATH handle it
-            if [ -z "$UV_PATH" ]; then
-              UV_PATH="uv"
-            fi
-            echo "Using uv at: $UV_PATH"
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:/home/herald/.cargo/bin:/usr/bin:/bin:\$PATH\" && $UV_PATH sync --frozen --no-dev"
             
             # Run database migrations
             echo "Running database migrations..."
-            # Use the same UV_PATH we found earlier
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:/home/herald/.cargo/bin:/usr/bin:/bin:\$PATH\" && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && $UV_PATH run python deploy/run_migrations.py"
+            # Use venv python if available, otherwise try uv run
+            if [ -d "/opt/herald/.venv" ]; then
+              su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && /opt/herald/.venv/bin/python deploy/run_migrations.py"
+            else
+              UV_CMD=$(find /usr/local /root/.cargo /home/herald/.cargo -name uv -type f -executable 2>/dev/null | head -1)
+              if [ -n "$UV_CMD" ]; then
+                su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && $UV_CMD run python deploy/run_migrations.py"
+              else
+                echo "ERROR: Cannot run migrations - no venv and uv not found"
+                exit 1
+              fi
+            fi
             
             # Restart service
             echo "Restarting Herald service..."
