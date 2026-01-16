@@ -1,0 +1,73 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual triggering from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for git operations
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy to server
+        run: |
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
+            set -euo pipefail
+            
+            echo "=== Starting Herald Deployment ==="
+            
+            # Navigate to app directory
+            cd /opt/herald
+            
+            # Pull latest code from main branch
+            echo "Pulling latest code from main..."
+            sudo -u herald git fetch origin
+            sudo -u herald git reset --hard origin/main
+            sudo -u herald git clean -fd
+            
+            # Update dependencies
+            echo "Updating dependencies..."
+            sudo -u herald bash << 'EOF'
+              cd /opt/herald
+              export PATH="/usr/local/bin:$PATH"
+              uv sync --frozen --no-dev
+            EOF
+            
+            # Restart service
+            echo "Restarting Herald service..."
+            sudo systemctl restart herald
+            
+            # Wait a moment for service to start
+            sleep 3
+            
+            # Check service status
+            echo "=== Service Status ==="
+            sudo systemctl status herald --no-pager -l || true
+            
+            echo ""
+            echo "=== Deployment Complete ==="
+          ENDSSH
+      
+      - name: Verify deployment
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "Check server logs with:"
+          echo "ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} 'sudo journalctl -u herald -n 50 --no-pager'"
