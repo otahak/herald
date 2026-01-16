@@ -27,7 +27,7 @@
     <!-- Header -->
     <div class="text-center mb-8">
         <h1 class="text-3xl font-bold mb-2">Herald</h1>
-        <p class="text-base-content/70">Grimdark Future Digital Scoreboard</p>
+        <p class="text-base-content/70">OnePageRules games Digital Scoreboard</p>
     </div>
     
     <!-- Error Alert -->
@@ -64,16 +64,6 @@
                     placeholder="My Game"
                     class="input input-bordered"
                 />
-            </div>
-            
-            <div class="form-control">
-                <label class="label">
-                    <span class="label-text">Game System</span>
-                </label>
-                <select v-model="createForm.gameSystem" class="select select-bordered">
-                    <option value="gff">Grimdark Future: Firefight (Skirmish)</option>
-                    <option value="gf">Grimdark Future (Army Scale)</option>
-                </select>
             </div>
             
             <div class="form-control">
@@ -248,7 +238,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 
                 createForm: {
                     gameName: '',
-                    gameSystem: 'gff',
                     playerName: '',
                     playerColor: '#3b82f6',
                 },
@@ -297,7 +286,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     const code = await GameStore.actions.createGame(
                         this.createForm.gameName || 'New Game',
-                        this.createForm.gameSystem,
                         this.createForm.playerName,
                         this.createForm.playerColor
                     );

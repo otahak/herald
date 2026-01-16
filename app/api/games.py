@@ -29,7 +29,7 @@ logger = logging.getLogger("Herald.games")
 class CreateGameRequest(BaseModel):
     """Request to create a new game."""
     name: str = Field(default="New Game", max_length=100)
-    game_system: GameSystem = GameSystem.GFF
+    game_system: Optional[GameSystem] = Field(default=GameSystem.GFF)
     player_name: str = Field(max_length=50)
     player_color: str = Field(default="#3b82f6", max_length=20)
 

@@ -115,7 +115,7 @@ const GameStore = {
         /**
          * Create a new game
          */
-        async createGame(name, gameSystem, playerName, playerColor) {
+        async createGame(name, playerName, playerColor) {
             GameStore.state.isLoading = true;
             GameStore.state.error = null;
             
@@ -126,7 +126,6 @@ const GameStore = {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name,
-                        game_system: gameSystem,
                         player_name: playerName,
                         player_color: playerColor,
                     }),
