@@ -13,9 +13,11 @@ async def admin_dashboard(request: Request) -> Template:
 
 
 @get("/admin/login-page")
-async def admin_login_page() -> Template:
+async def admin_login_page(request: Request) -> Template:
     """Admin login page (shown when not authenticated)."""
-    return Template(template_name="admin/login.html")
+    from app.auth.oauth import get_base_path
+    base_path = get_base_path(request)
+    return Template(template_name="admin/login.html", context={"base_path": base_path})
 
 
 @get("/admin/login")

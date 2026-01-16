@@ -62,14 +62,12 @@ def log_exceptions(request: Request, exc: Exception) -> Response:
 def handle_auth_exception(request: Request, exc: NotAuthorizedException) -> Response:
     """Handle authentication failures by redirecting to login."""
     from litestar.response import Redirect
+    from app.auth.oauth import get_base_path
     # Only redirect for admin routes (handle both /admin and /herald/admin)
     path = request.url.path
     if "/admin" in path or path.endswith("/admin") or path.endswith("/api/admin"):
         # Extract base path if app is served under a subpath (e.g., /herald)
-        if "/admin" in path:
-            base_path = path[:path.index("/admin")]
-        else:
-            base_path = ""
+        base_path = get_base_path(request)
         return Redirect(f"{base_path}/admin/login-page")
     return Response(
         content={"detail": "Not authorized"},

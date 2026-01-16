@@ -31,19 +31,21 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 session_store = MemoryStore()
 
 
+def get_base_path(request: Request) -> str:
+    """Extract the base path from the request (e.g., '/herald' if app is served at /herald)."""
+    path = request.url.path
+    # Find the base path by looking for /admin in the path
+    if "/admin" in path:
+        return path[:path.index("/admin")]
+    return ""
+
+
 def get_redirect_uri(request: Request) -> str:
     """Get the OAuth redirect URI based on the request."""
     scheme = request.url.scheme
     host = request.url.hostname
     port = request.url.port
-    path = request.url.path
-    
-    # Extract base path (e.g., "/herald" if app is served at /herald)
-    # Find the base path by looking for /admin in the path
-    if "/admin" in path:
-        base_path = path[:path.index("/admin")]
-    else:
-        base_path = ""
+    base_path = get_base_path(request)
     
     # Determine if we're in production or local
     if host == "otahak.com" or host.endswith(".otahak.com"):
@@ -234,8 +236,10 @@ async def admin_logout(request: Request) -> Redirect:
         await session_store.delete(f"{ADMIN_EMAIL_KEY}:{session_id}")
         logger.info(f"Admin logged out: session_id {session_id[:8]}...")
     
+    # Get base path for redirect
+    base_path = get_base_path(request)
     # Redirect to login page (not /admin/login which starts OAuth)
-    response = Redirect("/admin/login-page")
+    response = Redirect(f"{base_path}/admin/login-page")
     # Delete the session cookie
     response.delete_cookie("session_id", path="/")
     return response
