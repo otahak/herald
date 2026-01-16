@@ -22,6 +22,7 @@ def load_env_file():
     env_vars = {}
     
     if env_file.exists():
+        print(f"Loading environment variables from {env_file}")
         with open(env_file) as f:
             for line in f:
                 line = line.strip()
@@ -32,8 +33,25 @@ def load_env_file():
                 if "=" in line:
                     key, value = line.split("=", 1)
                     key = key.strip()
-                    value = value.strip().strip('"').strip("'")
+                    # Remove quotes from value if present
+                    value = value.strip()
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    elif value.startswith("'") and value.endswith("'"):
+                        value = value[1:-1]
                     env_vars[key] = value
+                    # Don't print sensitive values, but show we loaded them
+                    if key == "DATABASE_URL":
+                        # Show first and last few chars for debugging
+                        db_url = value
+                        if len(db_url) > 50:
+                            print(f"  Loaded {key} = {db_url[:20]}...{db_url[-10:]}")
+                        else:
+                            print(f"  Loaded {key} = (hidden)")
+                    else:
+                        print(f"  Loaded {key}")
+    else:
+        print(f"WARNING: .env file not found at {env_file}")
     
     return env_vars
 
@@ -57,6 +75,17 @@ async def run_migration(script_path: Path):
     # Merge with existing environment (env_vars take precedence)
     env = {**os.environ, **env_vars, "PYTHONPATH": str(PROJECT_ROOT)}
     
+    # Debug: verify DATABASE_URL is set
+    if "DATABASE_URL" in env:
+        db_url = env["DATABASE_URL"]
+        if len(db_url) > 50:
+            print(f"DATABASE_URL will be passed to subprocess: {db_url[:20]}...{db_url[-10:]}")
+        else:
+            print("DATABASE_URL will be passed to subprocess: (set)")
+    else:
+        print("WARNING: DATABASE_URL not found in environment!")
+        print("This migration may fail. Check that .env file exists and contains DATABASE_URL.")
+    
     # Prefer using venv python if it exists (most reliable)
     venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
     if venv_python.exists():
@@ -70,6 +99,8 @@ async def run_migration(script_path: Path):
                 break
         
         if uv_cmd:
+            # When using uv run, we need to ensure env vars are passed
+            # uv run inherits from parent, so setting env in subprocess.run should work
             cmd = [uv_cmd, "run", "python", str(script_path)]
         else:
             # Last resort: system python
