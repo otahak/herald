@@ -660,6 +660,28 @@ class GamesController(Controller):
                     player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
+            
+            # Sync shaken status to attached heroes (they share status with parent)
+            if unit.attached_heroes:
+                for attached_hero in unit.attached_heroes:
+                    if attached_hero.state and attached_hero.state.is_shaken != data.is_shaken:
+                        attached_hero.state.is_shaken = data.is_shaken
+                        if data.is_shaken:
+                            await log_event(
+                                session, game,
+                                EventType.STATUS_SHAKEN,
+                                f"{attached_hero.display_name} became Shaken (attached to {unit.display_name})",
+                                player_id=attached_hero.player_id,
+                                target_unit_id=attached_hero.id,
+                            )
+                        else:
+                            await log_event(
+                                session, game,
+                                EventType.STATUS_SHAKEN_CLEARED,
+                                f"{attached_hero.display_name} is no longer Shaken (attached to {unit.display_name})",
+                                player_id=attached_hero.player_id,
+                                target_unit_id=attached_hero.id,
+                            )
         
         if data.is_fatigued is not None:
             unit.state.is_fatigued = data.is_fatigued
