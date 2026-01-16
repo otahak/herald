@@ -50,9 +50,17 @@ def register_template_globals(engine: JinjaTemplateEngine) -> None:
     
     def base_path_helper(ctx: dict[str, Any]) -> str:
         """Helper to get base path from request in templates."""
+        # Request is automatically available in template context
         request = ctx.get("request")
         if request:
-            return get_base_path(request)
+            try:
+                return get_base_path(request)
+            except Exception:
+                # Fallback if get_base_path fails
+                path = getattr(request, "url", {}).path if hasattr(request, "url") else ""
+                if "/admin" in str(path):
+                    return str(path)[:str(path).index("/admin")]
+                return ""
         return ""
     
     # Register as a callable that templates can use
