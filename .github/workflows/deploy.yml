@@ -53,10 +53,13 @@ jobs:
             else
               echo "WARNING: .venv not found. Attempting to create it..."
               # Try to find uv to create venv
+              # First, try to make uv executable if we can
               UV_CMD=""
               for path in /usr/local/bin/uv /root/.cargo/bin/uv /home/herald/.cargo/bin/uv; do
                 if [ -f "$path" ]; then
+                  # Try to make it executable (may fail, but that's ok)
                   chmod +x "$path" 2>/dev/null || true
+                  # Check if it's executable now
                   if [ -x "$path" ]; then
                     UV_CMD="$path"
                     break
@@ -65,11 +68,30 @@ jobs:
               done
               if [ -n "$UV_CMD" ]; then
                 echo "Found uv at: $UV_CMD, creating venv..."
-                su herald -s /bin/bash -c "cd /opt/herald && $UV_CMD sync --frozen --no-dev"
+                # Try to run uv as root first to create venv, then chown it
+                if cd /opt/herald && $UV_CMD sync --frozen --no-dev 2>/dev/null; then
+                  echo "Venv created successfully"
+                  chown -R herald:herald /opt/herald/.venv 2>/dev/null || true
+                else
+                  echo "Failed to create venv with uv. Trying alternative method..."
+                  # Fallback: create venv using python3 directly
+                  if command -v python3 >/dev/null 2>&1; then
+                    echo "Creating venv using python3..."
+                    su herald -s /bin/bash -c "cd /opt/herald && python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -e ."
+                  else
+                    echo "ERROR: Cannot create venv - uv failed and python3 not found"
+                    exit 1
+                  fi
+                fi
               else
-                echo "ERROR: Cannot create venv - uv not found and .venv doesn't exist"
-                echo "Service will likely fail to start. Manual intervention required."
-                exit 1
+                echo "uv not found or not executable. Trying python3 directly..."
+                if command -v python3 >/dev/null 2>&1; then
+                  echo "Creating venv using python3..."
+                  su herald -s /bin/bash -c "cd /opt/herald && python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -e ."
+                else
+                  echo "ERROR: Cannot create venv - uv not found and python3 not available"
+                  exit 1
+                fi
               fi
             fi
             
