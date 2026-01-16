@@ -946,12 +946,29 @@ class GamesController(Controller):
         new_round = max(1, game.current_round + data.delta)
         game.current_round = new_round
         
-        # Log event
-        await log_event(
-            session, game,
-            EventType.ROUND_STARTED if data.delta > 0 else EventType.ROUND_ENDED,
-            f"Round changed: {round_before} → {new_round} ({'+' if data.delta >= 0 else ''}{data.delta})",
-        )
+        # Log event or delete log entry
+        if data.delta > 0:
+            # Round increased: Create log entry
+            await log_event(
+                session, game,
+                EventType.ROUND_STARTED,
+                f"Round changed: {round_before} → {new_round} (+{data.delta})",
+            )
+        elif data.delta < 0:
+            # Round decreased: Delete the most recent ROUND_STARTED event
+            stmt = (
+                select(GameEvent)
+                .where(GameEvent.game_id == game.id)
+                .where(GameEvent.event_type == EventType.ROUND_STARTED)
+                .where(GameEvent.is_undone == False)
+                .order_by(GameEvent.created_at.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            recent_round_event = result.scalar_one_or_none()
+            
+            if recent_round_event:
+                await session.delete(recent_round_event)
         
         await session.commit()
         await session.refresh(game)
