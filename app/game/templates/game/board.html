@@ -116,7 +116,7 @@
     <div v-else-if="error" class="flex items-center justify-center min-h-screen">
         <div class="alert alert-error max-w-md">
             <span>[[ error ]]</span>
-            <a href="/" class="btn btn-sm">Back to Lobby</a>
+            <a href="/herald/" class="btn btn-sm">Back to Lobby</a>
         </div>
     </div>
     
@@ -420,7 +420,7 @@
                 </div>
                 <div class="flex gap-2">
                     <button class="btn btn-primary flex-1" @click="createNewPlayer">Join Game</button>
-                    <a href="/" class="btn btn-outline">Cancel</a>
+                    <a href="/herald/" class="btn btn-outline">Cancel</a>
                 </div>
             </div>
             
@@ -428,7 +428,7 @@
             <div v-else class="space-y-3">
                 <div v-if="joinError" class="alert alert-error">[[ joinError ]]</div>
                 <p class="text-sm text-base-content/70">This game already has two active players.</p>
-                <a href="/" class="btn btn-outline btn-block">Return to Lobby</a>
+                <a href="/herald/" class="btn btn-outline btn-block">Return to Lobby</a>
             </div>
         </div>
         <div class="modal-backdrop bg-black/50"></div>
