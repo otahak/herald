@@ -20,6 +20,9 @@ jobs:
   deploy:
     name: Deploy to Server
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      secrets: read  # Explicitly grant permission to read secrets
     
     steps:
       - name: Checkout code
@@ -47,9 +50,22 @@ jobs:
         run: |
           # Debug: Check if secrets are set (without exposing values)
           echo "Checking secrets..."
+          echo "Secret names being checked: DATABASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_AUTHORIZED_EMAIL, APP_DEBUG"
+          
+          # Check if the secret reference itself is empty (before variable expansion)
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "ERROR: secrets.DATABASE_URL reference is empty!"
+            echo "This means the secret is not set in GitHub Actions secrets."
+            echo "Please verify:"
+            echo "  1. Go to: https://github.com/otahak/herald/settings/secrets/actions"
+            echo "  2. Ensure 'DATABASE_URL' secret exists (case-sensitive)"
+            echo "  3. Check that you're in 'Actions' secrets, not 'Codespaces' secrets"
+            exit 1
+          fi
+          
           if [ -z "$DATABASE_URL" ]; then
-            echo "ERROR: DATABASE_URL secret is empty or not set!"
-            echo "Please verify the secret is set in GitHub repository settings."
+            echo "ERROR: DATABASE_URL environment variable is empty after expansion!"
+            echo "Secret reference exists but variable is empty - this shouldn't happen."
             exit 1
           else
             echo "✓ DATABASE_URL is set (length: ${#DATABASE_URL})"
