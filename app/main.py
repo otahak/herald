@@ -6,6 +6,7 @@ from litestar import Litestar, Request
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemyInitPlugin, SQLAlchemyAsyncConfig
 from litestar.contrib.jinja import JinjaTemplateEngine
 from litestar.template.config import TemplateConfig
+from typing import Any
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_401_UNAUTHORIZED
 from litestar.response import Response, Redirect
 from litestar.exceptions import NotAuthorizedException
@@ -42,9 +43,25 @@ plugin = SQLAlchemyInitPlugin(config)
 template_dirs = [
     str(p) for p in Path(__file__).parent.glob("**/templates") if p.is_dir()
 ]
+
+def register_template_globals(engine: JinjaTemplateEngine) -> None:
+    """Register template globals and callables."""
+    from app.auth.oauth import get_base_path
+    
+    def base_path_helper(ctx: dict[str, Any]) -> str:
+        """Helper to get base path from request in templates."""
+        request = ctx.get("request")
+        if request:
+            return get_base_path(request)
+        return ""
+    
+    # Register as a callable that templates can use
+    engine.register_template_callable("get_base_path", base_path_helper)
+
 template_config = TemplateConfig(
     directory=template_dirs,
-    engine=JinjaTemplateEngine
+    engine=JinjaTemplateEngine,
+    engine_callback=register_template_globals,
 )
 
 
