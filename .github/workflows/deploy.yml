@@ -133,6 +133,24 @@ EOF
             chmod 600 /opt/herald/.env
             echo "✓ .env file updated"
             
+            # Verify .env file format (no leading spaces, proper KEY=VALUE format)
+            echo "Verifying .env file format..."
+            if grep -q "^[[:space:]]" /opt/herald/.env; then
+              echo "ERROR: .env file contains lines with leading spaces - this will break systemd EnvironmentFile!"
+              echo "First 5 lines of .env file:"
+              head -5 /opt/herald/.env | cat -A
+              exit 1
+            fi
+            if ! grep -q "^GOOGLE_CLIENT_ID=" /opt/herald/.env; then
+              echo "ERROR: GOOGLE_CLIENT_ID not found in .env file!"
+              exit 1
+            fi
+            if ! grep -q "^GOOGLE_CLIENT_SECRET=" /opt/herald/.env; then
+              echo "ERROR: GOOGLE_CLIENT_SECRET not found in .env file!"
+              exit 1
+            fi
+            echo "✓ .env file format verified (no leading spaces, required keys present)"
+            
             # Branch is passed as environment variable
             echo "Deploying branch: ${DEPLOY_BRANCH:-main}"
             
@@ -219,9 +237,23 @@ EOF
             # Wait a moment for service to start
             sleep 3
             
+            # Verify environment variables are loaded by checking service environment
+            echo "=== Verifying Environment Variables ==="
+            if sudo systemctl show herald | grep -q "GOOGLE_CLIENT_ID="; then
+              echo "✓ GOOGLE_CLIENT_ID is loaded in service environment"
+            else
+              echo "⚠ WARNING: GOOGLE_CLIENT_ID not found in service environment"
+              echo "This may indicate the .env file is not being read correctly"
+            fi
+            
             # Check service status
             echo "=== Service Status ==="
             sudo systemctl status herald --no-pager -l || true
+            
+            # Show recent logs to verify OAuth credentials loaded
+            echo ""
+            echo "=== Recent Service Logs (checking for OAuth credentials) ==="
+            sudo journalctl -u herald -n 20 --no-pager | grep -i "oauth\|google" || echo "No OAuth-related log entries found"
             
             echo ""
             echo "=== Deployment Complete ==="
