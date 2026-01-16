@@ -15,6 +15,28 @@ from pathlib import Path
 DEPLOY_DIR = Path(__file__).parent
 PROJECT_ROOT = DEPLOY_DIR.parent
 
+
+def load_env_file():
+    """Load environment variables from .env file if it exists."""
+    env_file = PROJECT_ROOT / ".env"
+    env_vars = {}
+    
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                # Skip comments and empty lines
+                if not line or line.startswith("#"):
+                    continue
+                # Parse KEY=VALUE format
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    env_vars[key] = value
+    
+    return env_vars
+
 def find_migration_scripts():
     """Find all migration scripts in the deploy directory."""
     migrations = []
@@ -29,11 +51,16 @@ async def run_migration(script_path: Path):
     print(f"Running migration: {script_path.name}")
     print(f"{'='*60}")
     
+    # Load environment variables from .env file
+    env_vars = load_env_file()
+    
+    # Merge with existing environment (env_vars take precedence)
+    env = {**os.environ, **env_vars, "PYTHONPATH": str(PROJECT_ROOT)}
+    
     # Prefer using venv python if it exists (most reliable)
     venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
     if venv_python.exists():
         cmd = [str(venv_python), str(script_path)]
-        env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
     else:
         # Fallback: try uv run, then system python
         uv_cmd = None
@@ -44,11 +71,9 @@ async def run_migration(script_path: Path):
         
         if uv_cmd:
             cmd = [uv_cmd, "run", "python", str(script_path)]
-            env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
         else:
             # Last resort: system python
             cmd = [sys.executable, str(script_path)]
-            env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
     
     # Run the migration script
     result = subprocess.run(
