@@ -24,7 +24,7 @@ async def main():
         env_file = PROJECT_ROOT / ".env"
         if env_file.exists():
             try:
-                with open(env_file) as f:
+                with open(env_file, "r") as f:
                     for line in f:
                         line = line.strip()
                         # Skip comments and empty lines
@@ -38,13 +38,22 @@ async def main():
                                 database_url = database_url[1:-1]
                             elif database_url.startswith("'") and database_url.endswith("'"):
                                 database_url = database_url[1:-1]
+                            print(f"Loaded DATABASE_URL from .env file")
                             break
             except Exception as e:
-                print(f"Warning: Could not read .env file: {e}")
+                print(f"Warning: Could not read .env file at {env_file}: {e}")
+        else:
+            print(f"Warning: .env file not found at {env_file}")
     
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
         print("WARNING: Using default DATABASE_URL")
+    else:
+        # Validate DATABASE_URL is not empty
+        if not database_url or database_url.strip() == "":
+            print("ERROR: DATABASE_URL is empty!")
+            database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
+            print("WARNING: Using default DATABASE_URL")
     
     print(f"Connecting to database...")
     engine = create_async_engine(database_url, echo=False)

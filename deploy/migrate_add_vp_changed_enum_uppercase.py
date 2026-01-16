@@ -22,7 +22,7 @@ if not database_url:
     env_file = PROJECT_ROOT / ".env"
     if env_file.exists():
         try:
-            with open(env_file) as f:
+            with open(env_file, "r") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#"):
@@ -33,11 +33,16 @@ if not database_url:
                             database_url = database_url[1:-1]
                         elif database_url.startswith("'") and database_url.endswith("'"):
                             database_url = database_url[1:-1]
+                        print(f"Loaded DATABASE_URL from .env file")
                         break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Could not read .env file at {env_file}: {e}")
 
-DATABASE_URL = database_url or "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
+if not database_url or database_url.strip() == "":
+    database_url = "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
+    print("WARNING: Using default DATABASE_URL")
+
+DATABASE_URL = database_url
 
 async def migrate():
     """Add VP_CHANGED (uppercase) to eventtype enum."""

@@ -90,6 +90,8 @@ async def run_migration(script_path: Path):
     venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
     if venv_python.exists():
         cmd = [str(venv_python), str(script_path)]
+        # For venv python, pass the full env dict
+        subprocess_env = env
     else:
         # Fallback: try uv run, then system python
         uv_cmd = None
@@ -100,22 +102,25 @@ async def run_migration(script_path: Path):
         
         if uv_cmd:
             # When using uv run, explicitly pass --env-file to load .env
-            # This ensures environment variables are available to the migration script
+            # uv run will load the .env file, but we also pass env to ensure PYTHONPATH is set
             env_file = PROJECT_ROOT / ".env"
             if env_file.exists():
                 cmd = [uv_cmd, "run", "--env-file", str(env_file), "python", str(script_path)]
             else:
                 # Fallback: try without --env-file (should still inherit from env dict)
                 cmd = [uv_cmd, "run", "python", str(script_path)]
+            # uv run handles env loading, but we still pass env for PYTHONPATH and other vars
+            subprocess_env = env
         else:
             # Last resort: system python
             cmd = [sys.executable, str(script_path)]
+            subprocess_env = env
     
     # Run the migration script
     result = subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),
-        env=env,
+        env=subprocess_env,
         capture_output=True,
         text=True,
     )
