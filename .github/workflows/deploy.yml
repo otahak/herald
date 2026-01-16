@@ -45,20 +45,13 @@ jobs:
             
             # Update dependencies
             echo "Updating dependencies..."
-            # Try to find uv in various locations, checking if it's executable
-            UV_CMD=""
-            for path in "/usr/local/bin/uv" "/root/.cargo/bin/uv" "/home/herald/.cargo/bin/uv" "/usr/bin/uv"; do
-              if [ -x "$path" ]; then
-                UV_CMD="$path"
-                break
-              fi
-            done
-            # If not found, try to use uv from PATH
-            if [ -z "$UV_CMD" ]; then
-              UV_CMD="uv"
+            # Fix permissions on uv if it exists and isn't executable by herald user
+            if [ -f /usr/local/bin/uv ]; then
+              chmod +x /usr/local/bin/uv || true
             fi
-            echo "Using uv at: $UV_CMD"
-            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:/home/herald/.cargo/bin:\$PATH\" && $UV_CMD sync --frozen --no-dev"
+            # Use uv from PATH - let the herald user's environment find it
+            # The herald user should have uv in their PATH from their shell profile
+            su herald -s /bin/bash -c "cd /opt/herald && source ~/.bashrc 2>/dev/null || true && source ~/.profile 2>/dev/null || true && export PATH=\"/usr/local/bin:/root/.cargo/bin:/home/herald/.cargo/bin:\$PATH\" && uv sync --frozen --no-dev"
             
             # Run database migrations
             echo "Running database migrations..."
