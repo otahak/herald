@@ -45,6 +45,34 @@ jobs:
           GOOGLE_AUTHORIZED_EMAIL: ${{ secrets.GOOGLE_AUTHORIZED_EMAIL }}
           APP_DEBUG: ${{ secrets.APP_DEBUG || 'false' }}
         run: |
+          # Debug: Check if secrets are set (without exposing values)
+          echo "Checking secrets..."
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ERROR: DATABASE_URL secret is empty or not set!"
+            echo "Please verify the secret is set in GitHub repository settings."
+            exit 1
+          else
+            echo "✓ DATABASE_URL is set (length: ${#DATABASE_URL})"
+          fi
+          
+          if [ -z "$GOOGLE_CLIENT_ID" ]; then
+            echo "WARNING: GOOGLE_CLIENT_ID secret is empty"
+          else
+            echo "✓ GOOGLE_CLIENT_ID is set"
+          fi
+          
+          if [ -z "$GOOGLE_CLIENT_SECRET" ]; then
+            echo "WARNING: GOOGLE_CLIENT_SECRET secret is empty"
+          else
+            echo "✓ GOOGLE_CLIENT_SECRET is set"
+          fi
+          
+          if [ -z "$GOOGLE_AUTHORIZED_EMAIL" ]; then
+            echo "WARNING: GOOGLE_AUTHORIZED_EMAIL secret is empty"
+          else
+            echo "✓ GOOGLE_AUTHORIZED_EMAIL is set"
+          fi
+          
           # Create .env file content locally
           cat > /tmp/herald.env << EOF
           DATABASE_URL=$DATABASE_URL
@@ -53,6 +81,15 @@ jobs:
           GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL
           APP_DEBUG=$APP_DEBUG
           EOF
+          
+          # Verify .env file was created correctly (check non-empty values)
+          if ! grep -q "DATABASE_URL=.*[^[:space:]]" /tmp/herald.env; then
+            echo "ERROR: DATABASE_URL in .env file is empty!"
+            echo "Contents of .env file (first 200 chars):"
+            head -c 200 /tmp/herald.env || cat /tmp/herald.env
+            exit 1
+          fi
+          echo "✓ .env file created successfully"
           
           # Transfer .env file to server
           scp /tmp/herald.env ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/herald.env
