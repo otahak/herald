@@ -19,6 +19,15 @@ logger = logging.getLogger("Herald.auth")
 GOOGLE_CLIENT_ID = getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_AUTHORIZED_EMAIL = getenv("GOOGLE_AUTHORIZED_EMAIL", "otahak@gmail.com")
+
+# Log OAuth configuration status at module load (for debugging)
+if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+    logger.warning("Google OAuth credentials not configured - GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is missing")
+    logger.debug(f"GOOGLE_CLIENT_ID present: {bool(GOOGLE_CLIENT_ID)}, GOOGLE_CLIENT_SECRET present: {bool(GOOGLE_CLIENT_SECRET)}")
+else:
+    logger.info("Google OAuth credentials loaded successfully")
+    logger.debug(f"GOOGLE_CLIENT_ID: {GOOGLE_CLIENT_ID[:20]}... (length: {len(GOOGLE_CLIENT_ID)})")
+    logger.debug(f"GOOGLE_CLIENT_SECRET: {'*' * min(20, len(GOOGLE_CLIENT_SECRET))}... (length: {len(GOOGLE_CLIENT_SECRET)})")
 ADMIN_SESSION_KEY = "admin_authenticated"
 ADMIN_EMAIL_KEY = "admin_email"
 

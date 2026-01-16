@@ -88,14 +88,14 @@ jobs:
             echo "✓ GOOGLE_AUTHORIZED_EMAIL is set"
           fi
           
-          # Create .env file content locally
+          # Create .env file content locally (no leading spaces for systemd compatibility)
           cat > /tmp/herald.env << EOF
-          DATABASE_URL=$DATABASE_URL
-          GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
-          GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
-          GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL
-          APP_DEBUG=$APP_DEBUG
-          EOF
+DATABASE_URL=$DATABASE_URL
+GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL
+APP_DEBUG=$APP_DEBUG
+EOF
           
           # Verify .env file was created correctly (check non-empty values)
           if ! grep -q "DATABASE_URL=.*[^[:space:]]" /tmp/herald.env; then
@@ -211,8 +211,9 @@ jobs:
               fi
             fi
             
-            # Restart service
-            echo "Restarting Herald service..."
+            # Reload systemd to pick up any .env changes, then restart service
+            echo "Reloading systemd and restarting Herald service..."
+            sudo systemctl daemon-reload
             sudo systemctl restart herald
             
             # Wait a moment for service to start
