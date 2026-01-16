@@ -44,16 +44,22 @@ def load_env_file():
                     if not line or line.startswith("#"):
                         continue
                     # Parse KEY=VALUE format
-                    if "=" in line:
-                        key, value = line.split("=", 1)
-                        key = key.strip()
-                        # Remove quotes from value if present
-                        value = value.strip()
-                        if value.startswith('"') and value.endswith('"'):
-                            value = value[1:-1]
-                        elif value.startswith("'") and value.endswith("'"):
-                            value = value[1:-1]
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    # Remove quotes from value if present
+                    value = value.strip()
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    elif value.startswith("'") and value.endswith("'"):
+                        value = value[1:-1]
+                    # Skip empty values (but still store them to show they were found)
+                    if value:
                         env_vars[key] = value
+                    else:
+                        # Empty value - this is a problem
+                        print(f"  WARNING: {key} is empty in .env file!")
+                        env_vars[key] = value  # Store empty string so we know it exists but is empty
                         # Don't print sensitive values, but show we loaded them
                         if key == "DATABASE_URL":
                             # Show first and last few chars for debugging

@@ -79,37 +79,37 @@ async def migrate():
     print("Attempting to connect to database...")
     try:
         async with engine.begin() as conn:
-        # Check if column already exists
-        check_query = text("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name='units' AND column_name='attached_to_unit_id'
-        """)
-        result = await conn.execute(check_query)
-        exists = result.fetchone() is not None
-        
-        if exists:
-            print("Column 'attached_to_unit_id' already exists. Skipping migration.")
-        else:
-            # Add the column
-            alter_query = text("""
-                ALTER TABLE units 
-                ADD COLUMN attached_to_unit_id UUID,
-                ADD CONSTRAINT fk_units_attached_to_unit 
-                    FOREIGN KEY (attached_to_unit_id) 
-                    REFERENCES units(id) 
-                    ON DELETE SET NULL
+            # Check if column already exists
+            check_query = text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='units' AND column_name='attached_to_unit_id'
             """)
-            await conn.execute(alter_query)
+            result = await conn.execute(check_query)
+            exists = result.fetchone() is not None
             
-            # Add index for performance
-            index_query = text("""
-                CREATE INDEX IF NOT EXISTS ix_units_attached_to_unit_id 
-                ON units(attached_to_unit_id)
-            """)
-            await conn.execute(index_query)
-            
-            print("Successfully added 'attached_to_unit_id' column to units table!")
+            if exists:
+                print("Column 'attached_to_unit_id' already exists. Skipping migration.")
+            else:
+                # Add the column
+                alter_query = text("""
+                    ALTER TABLE units 
+                    ADD COLUMN attached_to_unit_id UUID,
+                    ADD CONSTRAINT fk_units_attached_to_unit 
+                        FOREIGN KEY (attached_to_unit_id) 
+                        REFERENCES units(id) 
+                        ON DELETE SET NULL
+                """)
+                await conn.execute(alter_query)
+                
+                # Add index for performance
+                index_query = text("""
+                    CREATE INDEX IF NOT EXISTS ix_units_attached_to_unit_id 
+                    ON units(attached_to_unit_id)
+                """)
+                await conn.execute(index_query)
+                
+                print("Successfully added 'attached_to_unit_id' column to units table!")
     except Exception as e:
         print(f"ERROR: Failed to connect to database: {e}")
         import traceback
