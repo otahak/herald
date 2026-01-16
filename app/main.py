@@ -13,6 +13,8 @@ from app.routes import ROUTES
 from app.models import Base  # Import models Base for table creation
 
 DEBUG = getenv("APP_DEBUG", "false").lower() == "true"
+# Default DATABASE_URL is for local dev only (Docker Compose)
+# Production should always set DATABASE_URL environment variable
 DATABASE_URL = getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@db:5432/herald"
