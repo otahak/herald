@@ -558,6 +558,10 @@ const GameStore = {
                     GameStore.state.players = data.players;
                     GameStore.state.units = data.units;
                     GameStore.state.objectives = data.objectives;
+                    // Fetch events on state update
+                    if (data.code) {
+                        this.fetchEvents();
+                    }
                     break;
                 
                 case 'state_update':

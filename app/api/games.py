@@ -1,8 +1,9 @@
 """Game session API endpoints."""
 
 import logging
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Any
 
 from litestar import Controller, get, post, patch, delete
@@ -75,6 +76,11 @@ class CreateObjectivesRequest(BaseModel):
 class UpdateVictoryPointsRequest(BaseModel):
     """Request to update a player's victory points."""
     delta: int = Field(description="Change in VP (+1, -1, etc.)")
+
+
+class UpdateRoundRequest(BaseModel):
+    """Request to update the game round."""
+    delta: int = Field(description="Change in round (+1, -1, etc.)")
 
 
 # --- Response Schemas ---
@@ -537,25 +543,62 @@ class GamesController(Controller):
             unit.state.wounds_taken = data.wounds_taken
             
             if wound_diff > 0:
+                # Adding wounds: Create one log entry for each wound (like VP)
                 changes.append(f"took {wound_diff} wound(s)")
-                await log_event(
-                    session, game,
-                    EventType.UNIT_WOUNDED,
-                    f"{unit.display_name} took {wound_diff} wound(s) ({unit.state.wounds_remaining}/{unit.max_wounds} remaining)",
-                    target_unit_id=unit.id,
-                    details={"wounds": wound_diff, "wounds_before": previous_state["wounds_taken"], "wounds_after": data.wounds_taken},
-                    previous_state=previous_state,
-                )
+                for i in range(wound_diff):
+                    wounds_at_this_point = previous_state["wounds_taken"] + i
+                    await log_event(
+                        session, game,
+                        EventType.UNIT_WOUNDED,
+                        f"{unit.display_name} took 1 wound ({unit.max_wounds - wounds_at_this_point - 1}/{unit.max_wounds} remaining)",
+                        player_id=unit.player_id,
+                        target_unit_id=unit.id,
+                        details={
+                            "wounds": 1,
+                            "wounds_before": wounds_at_this_point,
+                            "wounds_after": wounds_at_this_point + 1,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                        previous_state={"wounds_taken": wounds_at_this_point},
+                    )
             else:
-                changes.append(f"healed {-wound_diff} wound(s)")
-                await log_event(
-                    session, game,
-                    EventType.UNIT_HEALED,
-                    f"{unit.display_name} healed {-wound_diff} wound(s)",
-                    target_unit_id=unit.id,
-                    details={"wounds_healed": -wound_diff},
-                    previous_state=previous_state,
+                # Removing wounds: Check if recent wound events should be deleted or logged as heals
+                wounds_to_remove = abs(wound_diff)
+                changes.append(f"removed {wounds_to_remove} wound(s)")
+                
+                # Find the most recent UNIT_WOUNDED events for this unit
+                stmt = (
+                    select(GameEvent)
+                    .where(GameEvent.game_id == game.id)
+                    .where(GameEvent.event_type == EventType.UNIT_WOUNDED)
+                    .where(GameEvent.target_unit_id == unit_id)
+                    .where(GameEvent.is_undone == False)
+                    .order_by(GameEvent.created_at.desc())
+                    .limit(wounds_to_remove)
                 )
+                result = await session.execute(stmt)
+                recent_wound_events = result.scalars().all()
+                
+                # Use timezone-aware datetime for comparison (created_at is timezone-aware from DB)
+                current_time = datetime.now(timezone.utc)
+                threshold_time = current_time - timedelta(seconds=30)
+                
+                for event in recent_wound_events:
+                    # Check if event was created within the last 30 seconds
+                    # created_at is timezone-aware, compare directly
+                    if event.created_at >= threshold_time:
+                        # Delete the event (wound was removed quickly, likely a mistake)
+                        await session.delete(event)
+                    else:
+                        # Event is older than 30 seconds, log as a heal
+                        await log_event(
+                            session, game,
+                            EventType.UNIT_HEALED,
+                            f"{unit.display_name} healed 1 wound",
+                            player_id=unit.player_id,
+                            target_unit_id=unit.id,
+                            details={"wounds_healed": 1},
+                        )
         
         if data.models_remaining is not None:
             unit.state.models_remaining = data.models_remaining
@@ -567,6 +610,7 @@ class GamesController(Controller):
                     session, game,
                     EventType.UNIT_ACTIVATED,
                     f"{unit.display_name} activated",
+                    player_id=unit.player_id,
                     target_unit_id=unit.id,
                 )
         
@@ -679,6 +723,15 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(unit)
         
+        # Broadcast state update to trigger event fetching on other clients
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "unit_updated",
+                "unit_id": str(unit_id),
+            }
+        })
+        
         return UnitResponse.model_validate(unit)
     
     @patch("/{code:str}/objectives/{objective_id:uuid}")
@@ -739,6 +792,15 @@ class GamesController(Controller):
         
         await session.commit()
         await session.refresh(objective)
+        
+        # Broadcast state update to trigger event fetching on other clients
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "objective_updated",
+                "objective_id": str(objective_id),
+            }
+        })
         
         return ObjectiveResponse.model_validate(objective)
     
@@ -812,17 +874,45 @@ class GamesController(Controller):
         if not player:
             raise NotFoundException(f"Player {player_id} not found in game")
         
+        # Store the VP before the change
+        vp_before = player.victory_points
+        
         # Update VP
         player.victory_points = max(0, player.victory_points + data.delta)  # Prevent negative VP
         
-        # Log event
-        # Note: EventType.VP_CHANGED is a str enum, so it should serialize to "vp_changed"
-        # If SQLAlchemy uses the name instead, we'll need to configure the Enum column differently
-        await log_event(
-            session, game,
-            EventType.VP_CHANGED,
-            f"{player.name} VP: {player.victory_points - data.delta} → {player.victory_points} ({'+' if data.delta >= 0 else ''}{data.delta})",
-        )
+        if data.delta > 0:
+            # Adding VP: Create one log entry for each point added
+            for i in range(data.delta):
+                vp_at_this_point = vp_before + i
+                await log_event(
+                    session, game,
+                    EventType.VP_CHANGED,
+                    f"{player.name} VP: {vp_at_this_point} → {vp_at_this_point + 1} (+1)",
+                    player_id=player_id,
+                    details={
+                        "vp_before": vp_at_this_point,
+                        "vp_after": vp_at_this_point + 1,
+                        "delta": 1,
+                    },
+                )
+        elif data.delta < 0:
+            # Removing VP: Delete the most recent VP_CHANGED events (one per point removed)
+            # This removes the corresponding "add" entries to reduce log clutter
+            events_to_delete = abs(data.delta)
+            stmt = (
+                select(GameEvent)
+                .where(GameEvent.game_id == game.id)
+                .where(GameEvent.event_type == EventType.VP_CHANGED)
+                .where(GameEvent.player_id == player_id)
+                .where(GameEvent.is_undone == False)
+                .order_by(GameEvent.created_at.desc())
+                .limit(events_to_delete)
+            )
+            result = await session.execute(stmt)
+            events_to_remove = result.scalars().all()
+            
+            for event in events_to_remove:
+                await session.delete(event)
         
         await session.commit()
         await session.refresh(player)
@@ -838,3 +928,41 @@ class GamesController(Controller):
         })
         
         return PlayerResponse.model_validate(player)
+    
+    @patch("/{code:str}/round")
+    async def update_round(
+        self,
+        code: str,
+        data: UpdateRoundRequest,
+        session: AsyncSession,
+    ) -> GameResponse:
+        """Update the game round."""
+        game = await get_game_by_code(session, code)
+        
+        # Store the round before the change
+        round_before = game.current_round
+        
+        # Update round (ensure it doesn't go below 1)
+        new_round = max(1, game.current_round + data.delta)
+        game.current_round = new_round
+        
+        # Log event
+        await log_event(
+            session, game,
+            EventType.ROUND_STARTED if data.delta > 0 else EventType.ROUND_ENDED,
+            f"Round changed: {round_before} → {new_round} ({'+' if data.delta >= 0 else ''}{data.delta})",
+        )
+        
+        await session.commit()
+        await session.refresh(game)
+        
+        # Broadcast state update
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "round_updated",
+                "current_round": new_round,
+            }
+        })
+        
+        return GameResponse.model_validate(game)

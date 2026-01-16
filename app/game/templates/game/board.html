@@ -240,6 +240,27 @@
                     </div>
                 </div>
                 
+                <!-- Round Tracker -->
+                <div class="p-4 border-b border-base-300">
+                    <h3 class="font-bold mb-2">Round</h3>
+                    <div class="flex items-center justify-center gap-2">
+                        <button 
+                            class="btn btn-xs btn-circle btn-ghost"
+                            @click="updateRound(-1)"
+                            :disabled="game.current_round <= 1"
+                        >
+                            -
+                        </button>
+                        <span class="font-bold min-w-[3rem] text-center">[[ game.current_round ]]</span>
+                        <button 
+                            class="btn btn-xs btn-circle btn-ghost"
+                            @click="updateRound(1)"
+                        >
+                            +
+                        </button>
+                    </div>
+                </div>
+                
                 <!-- Turn Controls -->
                 <div class="p-4 border-b border-base-300" v-if="game.status === 'in_progress'">
                     <h3 class="font-bold mb-2">Turn Controls</h3>
@@ -303,9 +324,8 @@
                 
                 <!-- Game Log -->
                 <div class="game-log flex-1 overflow-hidden flex flex-col">
-                    <div class="p-2 border-b border-base-300 flex justify-between items-center">
+                    <div class="p-2 border-b border-base-300">
                         <h3 class="font-bold text-sm">Game Log</h3>
-                        <button class="btn btn-xs btn-ghost" @click="fetchEvents">↻</button>
                     </div>
                     <div class="flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
                         <div 
@@ -893,6 +913,36 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             };
             
+            const updateRound = async (delta) => {
+                try {
+                    const code = game.value?.code;
+                    if (!code) return;
+                    
+                    const basePath = getBasePath();
+                    const response = await fetch(`${basePath}/api/games/${code}/round`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ delta }),
+                    });
+                    
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.detail || 'Failed to update round');
+                    }
+                    
+                    const updatedGame = await response.json();
+                    
+                    // Update local state
+                    game.value.current_round = updatedGame.current_round;
+                    
+                    // Refresh game state to get updated events
+                    await store.actions.fetchGame(code);
+                    await store.actions.fetchEvents();
+                } catch (error) {
+                    alert('Failed to update round: ' + error.message);
+                }
+            };
+            
             const getObjectiveClass = (obj) => {
                 if (obj.status === 'contested') return 'border-dashed';
                 return '';
@@ -977,10 +1027,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     });
                     await store.actions.fetchGame(code);
                 }
-            };
-            
-            const fetchEvents = async () => {
-                await store.actions.fetchEvents();
             };
             
             const formatTime = (timestamp) => {
@@ -1247,12 +1293,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 getHealthBarClass,
                 getPlayerVP,
                 updateVP,
+                updateRound,
                 updateUnit,
                 importArmy,
                 startGame,
                 advanceRound,
                 endGame,
-                fetchEvents,
                 formatTime,
                 createNewPlayer,
                 getBasePath,
