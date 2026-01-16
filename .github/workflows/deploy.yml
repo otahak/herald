@@ -39,31 +39,24 @@ jobs:
             
             # Pull latest code from main branch
             echo "Pulling latest code from main..."
-            sudo -u herald git fetch origin
-            sudo -u herald git reset --hard origin/main
-            sudo -u herald git clean -fd
+            cd /opt/herald
+            chown -R herald:herald /opt/herald
+            su herald -s /bin/bash -c "cd /opt/herald && git fetch origin && git reset --hard origin/main && git clean -fd"
             
             # Update dependencies
             echo "Updating dependencies..."
-            sudo -u herald bash << 'EOF'
-              cd /opt/herald
-              export PATH="/usr/local/bin:$PATH"
-              uv sync --frozen --no-dev
-            EOF
+            # Try to find uv, fall back to using it from PATH
+            UV_CMD="uv"
+            if [ -f /usr/local/bin/uv ]; then
+              UV_CMD="/usr/local/bin/uv"
+            elif [ -f /root/.cargo/bin/uv ]; then
+              UV_CMD="/root/.cargo/bin/uv"
+            fi
+            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:\$PATH\" && $UV_CMD sync --frozen --no-dev"
             
             # Run database migrations
             echo "Running database migrations..."
-            sudo -u herald bash << 'EOF'
-              cd /opt/herald
-              export PATH="/usr/local/bin:$PATH"
-              # Load DATABASE_URL from .env if it exists, otherwise use default
-              if [ -f /opt/herald/.env ]; then
-                export $(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs)
-              fi
-              # Fallback if still not set
-              export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald}"
-              python3 deploy/run_migrations.py
-            EOF
+            su herald -s /bin/bash -c "cd /opt/herald && export PATH=\"/usr/local/bin:/root/.cargo/bin:\$PATH\" && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && python3 deploy/run_migrations.py"
             
             # Restart service
             echo "Restarting Herald service..."
