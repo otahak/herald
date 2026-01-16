@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      secrets: read  # Explicitly grant permission to read secrets
     
     steps:
       - name: Checkout code
