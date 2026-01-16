@@ -23,11 +23,24 @@ async def main():
         # Try loading from .env file
         env_file = PROJECT_ROOT / ".env"
         if env_file.exists():
-            with open(env_file) as f:
-                for line in f:
-                    if line.strip().startswith("DATABASE_URL="):
-                        database_url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        break
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip comments and empty lines
+                        if not line or line.startswith("#"):
+                            continue
+                        if line.startswith("DATABASE_URL="):
+                            # Split on first = only
+                            database_url = line.split("=", 1)[1].strip()
+                            # Remove surrounding quotes if present
+                            if database_url.startswith('"') and database_url.endswith('"'):
+                                database_url = database_url[1:-1]
+                            elif database_url.startswith("'") and database_url.endswith("'"):
+                                database_url = database_url[1:-1]
+                            break
+            except Exception as e:
+                print(f"Warning: Could not read .env file: {e}")
     
     if not database_url:
         database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"

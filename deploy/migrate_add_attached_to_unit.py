@@ -15,10 +15,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
-)
+# Load DATABASE_URL from environment or .env file
+PROJECT_ROOT = Path(__file__).parent.parent
+database_url = os.getenv("DATABASE_URL")
+
+if not database_url:
+    # Try loading from .env file
+    env_file = PROJECT_ROOT / ".env"
+    if env_file.exists():
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.startswith("DATABASE_URL="):
+                        database_url = line.split("=", 1)[1].strip()
+                        if database_url.startswith('"') and database_url.endswith('"'):
+                            database_url = database_url[1:-1]
+                        elif database_url.startswith("'") and database_url.endswith("'"):
+                            database_url = database_url[1:-1]
+                        break
+        except Exception:
+            pass
+
+DATABASE_URL = database_url or "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
 
 async def migrate():
     """Add attached_to_unit_id column to units table."""

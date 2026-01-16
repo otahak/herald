@@ -99,9 +99,14 @@ async def run_migration(script_path: Path):
                 break
         
         if uv_cmd:
-            # When using uv run, we need to ensure env vars are passed
-            # uv run inherits from parent, so setting env in subprocess.run should work
-            cmd = [uv_cmd, "run", "python", str(script_path)]
+            # When using uv run, explicitly pass --env-file to load .env
+            # This ensures environment variables are available to the migration script
+            env_file = PROJECT_ROOT / ".env"
+            if env_file.exists():
+                cmd = [uv_cmd, "run", "--env-file", str(env_file), "python", str(script_path)]
+            else:
+                # Fallback: try without --env-file (should still inherit from env dict)
+                cmd = [uv_cmd, "run", "python", str(script_path)]
         else:
             # Last resort: system python
             cmd = [sys.executable, str(script_path)]
