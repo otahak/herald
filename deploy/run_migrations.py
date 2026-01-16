@@ -135,6 +135,17 @@ async def run_migration(script_path: Path):
             subprocess_env = env
     
     # Run the migration script
+    print(f"Running command: {' '.join(cmd)}")
+    print(f"Working directory: {PROJECT_ROOT}")
+    print(f"DATABASE_URL in env: {'SET' if 'DATABASE_URL' in subprocess_env else 'NOT SET'}")
+    if 'DATABASE_URL' in subprocess_env:
+        db_val = subprocess_env['DATABASE_URL']
+        if db_val:
+            print(f"DATABASE_URL length: {len(db_val)}")
+            print(f"DATABASE_URL starts with: {db_val[:30] if len(db_val) > 30 else db_val}")
+        else:
+            print("WARNING: DATABASE_URL is empty string!")
+    
     result = subprocess.run(
         cmd,
         cwd=str(PROJECT_ROOT),

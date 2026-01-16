@@ -68,8 +68,25 @@ async def main():
             database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
             print("WARNING: Using default DATABASE_URL")
     
+    # Debug: show what we're using (safely)
+    print(f"Using DATABASE_URL (length: {len(database_url)})")
+    if database_url.startswith("postgresql"):
+        # Show connection details without password
+        parts = database_url.split("@")
+        if len(parts) == 2:
+            print(f"  Connection: {parts[0].split('//')[0]}//***@{parts[1]}")
+        else:
+            print(f"  Connection: {database_url[:50]}...")
+    else:
+        print(f"  Connection: {database_url[:50]}...")
+    
     print(f"Connecting to database...")
-    engine = create_async_engine(database_url, echo=False)
+    try:
+        engine = create_async_engine(database_url, echo=False)
+    except Exception as e:
+        print(f"ERROR: Failed to create database engine: {e}")
+        print(f"  DATABASE_URL value: {repr(database_url)}")
+        raise
     
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     

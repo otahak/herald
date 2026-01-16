@@ -62,7 +62,17 @@ DATABASE_URL = database_url
 
 async def migrate():
     """Add attached_to_unit_id column to units table."""
-    engine = create_async_engine(DATABASE_URL, echo=True)
+    print(f"Using DATABASE_URL (length: {len(DATABASE_URL)})")
+    if DATABASE_URL.startswith("postgresql"):
+        parts = DATABASE_URL.split("@")
+        if len(parts) == 2:
+            print(f"  Connection: {parts[0].split('//')[0]}//***@{parts[1]}")
+    try:
+        engine = create_async_engine(DATABASE_URL, echo=True)
+    except Exception as e:
+        print(f"ERROR: Failed to create database engine: {e}")
+        print(f"  DATABASE_URL value: {repr(DATABASE_URL)}")
+        raise
     
     async with engine.begin() as conn:
         # Check if column already exists
