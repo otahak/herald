@@ -596,22 +596,10 @@
                         class="btn btn-xs"
                         :class="unit.state.is_shaken ? 'btn-warning' : 'btn-outline'"
                         @click="toggleShaken"
+                        :title="attachedHeroes.length > 0 ? 'Shaken status applies to unit and attached heroes' : ''"
                     >
                         [[ unit.state.is_shaken ? '⚠ Shaken' : 'Shaken' ]]
                     </button>
-                    
-                    <!-- Attached Hero Shaken buttons -->
-                    <template v-for="hero in attachedHeroes" :key="`shaken-${hero.id}`">
-                        <button 
-                            v-if="hero && hero.state"
-                            class="btn btn-xs"
-                            :class="hero.state?.is_shaken ? 'btn-warning' : 'btn-outline'"
-                            @click="toggleHeroShaken(hero)"
-                            :title="`Toggle Shaken for ${hero.custom_name || hero.name}`"
-                        >
-                            [[ hero.custom_name || hero.name ]] [[ hero.state?.is_shaken ? '⚠' : '' ]]
-                        </button>
-                    </template>
                     
                     <!-- Detach button (for attached heroes) -->
                     <button 
@@ -905,10 +893,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 emit('update', hero.id, { spell_tokens: newTokens });
             };
             
-            const toggleHeroShaken = (hero) => {
-                if (!hero || !hero.state) return;
-                emit('update', hero.id, { is_shaken: !hero.state.is_shaken });
-            };
             
             const detachUnit = async () => {
                 if (!confirm(`Detach ${props.unit.custom_name || props.unit.name} from its parent unit?`)) {
@@ -963,7 +947,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 destroyUnit,
                 adjustHeroWounds,
                 adjustHeroTokens,
-                toggleHeroShaken,
                 detachUnit,
             };
         },
