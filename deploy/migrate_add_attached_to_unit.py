@@ -121,6 +121,14 @@ async def migrate():
                 # Create units table with all columns (including attached_to_unit_id from model)
                 await conn.run_sync(Unit.__table__.create, checkfirst=True)
                 print("✓ Created 'units' table with all columns (including attached_to_unit_id)")
+                
+                # Create index for the column (since table was just created, index may not exist)
+                index_query = text("""
+                    CREATE INDEX IF NOT EXISTS ix_units_attached_to_unit_id 
+                    ON units(attached_to_unit_id)
+                """)
+                await conn.execute(index_query)
+                print("✓ Created index on attached_to_unit_id")
                 # Column already exists, so skip the ALTER below
                 return
             

@@ -115,6 +115,17 @@ async def main():
                 
                 if exists:
                     print("✓ Feedback table already exists, skipping migration")
+                    # Still ensure indexes exist (in case they were dropped)
+                    create_index_stmt = text("""
+                        CREATE INDEX IF NOT EXISTS ix_feedback_read ON feedback(read);
+                    """)
+                    await session.execute(create_index_stmt)
+                    create_index_stmt2 = text("""
+                        CREATE INDEX IF NOT EXISTS ix_feedback_created_at ON feedback(created_at DESC);
+                    """)
+                    await session.execute(create_index_stmt2)
+                    await session.commit()
+                    print("✓ Ensured indexes exist on feedback table")
                     return
                 
                 print("Creating feedback table...")

@@ -77,7 +77,22 @@ async def migrate():
     print("Attempting to connect to database...")
     try:
         async with engine.begin() as conn:
-            # Check if VP_CHANGED already exists in the enum
+            # First check if the enum type exists
+            type_check = text("""
+                SELECT EXISTS (
+                    SELECT FROM pg_type 
+                    WHERE typname = 'eventtype'
+                );
+            """)
+            type_result = await conn.execute(type_check)
+            type_exists = type_result.scalar()
+            
+            if not type_exists:
+                print("Enum type 'eventtype' does not exist. Skipping migration.")
+                print("  Note: The enum type should be created by the base schema (init_db.py)")
+                return
+            
+            # Check if vp_changed already exists in the enum
             check_query = text("""
                 SELECT enumlabel 
                 FROM pg_enum 
@@ -91,8 +106,10 @@ async def migrate():
                 print("Enum value 'vp_changed' already exists. Skipping migration.")
             else:
                 # Add the new enum value
+                # Note: PostgreSQL does not support IF NOT EXISTS for ALTER TYPE ADD VALUE
+                # We check first above to ensure idempotency
                 alter_query = text("""
-                    ALTER TYPE eventtype ADD VALUE IF NOT EXISTS 'vp_changed'
+                    ALTER TYPE eventtype ADD VALUE 'vp_changed'
                 """)
                 await conn.execute(alter_query)
                 print("Successfully added 'vp_changed' to eventtype enum!")

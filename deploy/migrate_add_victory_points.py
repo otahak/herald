@@ -119,13 +119,15 @@ async def migrate():
             if exists:
                 print("Column 'victory_points' already exists. Skipping migration.")
             else:
-                # Add the column
+                # Add the column with DEFAULT to ensure existing rows get 0
+                # Using NOT NULL with DEFAULT is safe for existing data
                 alter_query = text("""
                     ALTER TABLE players 
                     ADD COLUMN victory_points INTEGER NOT NULL DEFAULT 0
                 """)
                 await conn.execute(alter_query)
                 print("Successfully added 'victory_points' column to players table!")
+                print("  Note: All existing rows have been set to 0 (default value)")
     except Exception as e:
         print(f"ERROR: Failed to connect to database: {e}")
         import traceback
