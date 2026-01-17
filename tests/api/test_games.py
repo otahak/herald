@@ -88,7 +88,7 @@ async def test_import_army_broadcasts_state_update(client):
     ):
         resp_import = await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": guest_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": guest_id},
         )
         assert resp_import.status_code in (200, 201)
         data = resp_import.json()
@@ -252,7 +252,7 @@ async def test_wound_tracking_creates_individual_events(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the unit
@@ -333,7 +333,7 @@ async def test_attached_units_cannot_activate_separately(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the units
@@ -411,7 +411,7 @@ async def test_activating_parent_activates_attached_heroes(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the units
@@ -505,7 +505,7 @@ async def test_manual_detachment(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the hero unit
@@ -590,7 +590,7 @@ async def test_automatic_detachment_on_destroy(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the units
@@ -684,7 +684,7 @@ async def test_shaken_status_preserved_on_detachment(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the units
@@ -774,7 +774,7 @@ async def test_shaken_unshaken_logging(client):
     with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)):
         await client.post(
             f"/api/proxy/import-army/{code}",
-            json={"army_forge_url": "https://army-forge.onepagerules.com/api/tts?id=FAKE", "player_id": host_id},
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
         )
     
     # Get the unit
