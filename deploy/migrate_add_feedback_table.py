@@ -114,42 +114,10 @@ async def main():
                 exists = result.scalar()
                 
                 if exists:
-                    # Check current owner
-                    owner_stmt = text("""
-                        SELECT tableowner 
-                        FROM pg_tables 
-                        WHERE schemaname = 'public' 
-                        AND tablename = 'feedback';
-                    """)
-                    owner_result = await session.execute(owner_stmt)
-                    current_owner = owner_result.scalar()
-                    
-                    # Get the database user from connection
-                    current_user_stmt = text("SELECT current_user;")
-                    user_result = await session.execute(current_user_stmt)
-                    db_user = user_result.scalar()
-                    
-                    if current_owner == db_user:
-                        print(f"✓ Feedback table already exists and is owned by {db_user}, skipping migration")
-                        return
-                    else:
-                        print(f"⚠ Feedback table exists but owned by {current_owner}, not {db_user}")
-                        print("  Dropping and recreating table to fix ownership...")
-                        # Will drop and recreate below
+                    print("✓ Feedback table already exists, skipping migration")
+                    return
                 
                 print("Creating feedback table...")
-                
-                # Get the current database user - table will be owned by this user
-                current_user_stmt = text("SELECT current_user;")
-                result = await session.execute(current_user_stmt)
-                current_user = result.scalar()
-                print(f"Creating table as database user: {current_user}")
-                
-                # Create feedback table (will be owned by current_user automatically)
-                # If table already exists with wrong owner, drop it first
-                drop_table_stmt = text("DROP TABLE IF EXISTS feedback CASCADE;")
-                await session.execute(drop_table_stmt)
-                print("Dropped existing feedback table (if any) to fix ownership...")
                 
                 create_table_stmt = text("""
                     CREATE TABLE feedback (
@@ -164,7 +132,6 @@ async def main():
                 """)
                 
                 await session.execute(create_table_stmt)
-                print(f"✓ Feedback table created (owned by: {current_user})")
                 
                 # Create index on read status for faster queries
                 create_index_stmt = text("""
@@ -179,8 +146,7 @@ async def main():
                 await session.execute(create_index_stmt2)
                 
                 await session.commit()
-                print(f"✓ Feedback table created successfully")
-                print(f"✓ Permissions granted to user: {db_user}")
+                print("✓ Feedback table created successfully")
             except Exception as e:
                 await session.rollback()
                 print(f"✗ Error during migration: {e}")

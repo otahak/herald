@@ -54,7 +54,7 @@ if not database_url:
             print(f"  - {loc} (exists: {loc.exists()}, is_file: {loc.is_file() if loc.exists() else False})")
 
 if not database_url or database_url.strip() == "":
-    database_url = "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
+    database_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
     print("WARNING: Using default DATABASE_URL")
 
 DATABASE_URL = database_url

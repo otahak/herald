@@ -18,7 +18,7 @@ from app.models import Base
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald"
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/herald"
 )
 
 
