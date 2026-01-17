@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - dev  # Allow deploying from dev branch for testing
+      # - dev  # Allow deploying from dev branch for testing
   workflow_dispatch:  # Allow manual triggering from GitHub UI
     inputs:
       branch:
