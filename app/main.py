@@ -3,6 +3,59 @@ import os
 from os import getenv
 from pathlib import Path
 
+# CRITICAL: Load .env file BEFORE any other imports that might use environment variables
+# This must happen before importing routes, which imports OAuth module
+ENV_FILE_PATHS = [
+    Path("/opt/herald/.env"),
+    Path(__file__).parent.parent / ".env",
+    Path(__file__).parent.parent.parent / ".env",
+]
+
+def load_env_file_fallback():
+    """Load .env file directly if environment variables aren't set."""
+    # Use basic print for logging since logger might not be configured yet
+    for env_file in ENV_FILE_PATHS:
+        if env_file.exists() and env_file.is_file():
+            try:
+                loaded_count = 0
+                with open(env_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if not line or line.startswith("#"):
+                            continue
+                        # Parse KEY=VALUE format
+                        if "=" in line:
+                            key, value = line.split("=", 1)
+                            key = key.strip()
+                            value = value.strip()
+                            # Remove quotes if present
+                            if value.startswith('"') and value.endswith('"'):
+                                value = value[1:-1]
+                            elif value.startswith("'") and value.endswith("'"):
+                                value = value[1:-1]
+                            # Only set if not already in environment
+                            if key and value and key not in os.environ:
+                                os.environ[key] = value
+                                loaded_count += 1
+                if loaded_count > 0:
+                    print(f"[Herald] Loaded {loaded_count} environment variables from {env_file}")
+                return True
+            except Exception as e:
+                print(f"[Herald] Warning: Could not load .env file from {env_file}: {e}")
+    return False
+
+# Load .env file if OAuth credentials aren't in environment
+# This MUST happen before importing routes/oauth modules
+if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
+    print("[Herald] OAuth credentials not in environment, loading from .env file...")
+    load_env_file_fallback()
+    # Verify they're now loaded
+    if getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"):
+        print("[Herald] ✓ OAuth credentials loaded from .env file")
+    else:
+        print("[Herald] ⚠ WARNING: OAuth credentials still not found after loading .env file")
+
 from litestar import Litestar, Request
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemyInitPlugin, SQLAlchemyAsyncConfig
 from litestar.contrib.jinja import JinjaTemplateEngine
@@ -28,51 +81,6 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("Herald")
-
-# Try to load .env file directly as fallback if systemd didn't load it
-# This is a workaround for systemd EnvironmentFile issues
-ENV_FILE_PATHS = [
-    Path("/opt/herald/.env"),
-    Path(__file__).parent.parent / ".env",
-    Path(__file__).parent.parent.parent / ".env",
-]
-
-def load_env_file_fallback():
-    """Load .env file directly if environment variables aren't set."""
-    for env_file in ENV_FILE_PATHS:
-        if env_file.exists() and env_file.is_file():
-            try:
-                logger.info(f"Attempting to load .env file from: {env_file}")
-                with open(env_file, "r") as f:
-                    for line in f:
-                        line = line.strip()
-                        # Skip empty lines and comments
-                        if not line or line.startswith("#"):
-                            continue
-                        # Parse KEY=VALUE format
-                        if "=" in line:
-                            key, value = line.split("=", 1)
-                            key = key.strip()
-                            value = value.strip()
-                            # Remove quotes if present
-                            if value.startswith('"') and value.endswith('"'):
-                                value = value[1:-1]
-                            elif value.startswith("'") and value.endswith("'"):
-                                value = value[1:-1]
-                            # Only set if not already in environment
-                            if key and value and key not in os.environ:
-                                os.environ[key] = value
-                                logger.debug(f"Loaded {key} from .env file")
-                logger.info(f"✓ Loaded .env file from: {env_file}")
-                return True
-            except Exception as e:
-                logger.warning(f"Could not load .env file from {env_file}: {e}")
-    return False
-
-# Load .env file if OAuth credentials aren't in environment
-if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
-    logger.warning("OAuth credentials not in environment, attempting to load from .env file...")
-    load_env_file_fallback()
 
 logger.info(f"Starting app in {'DEBUG' if DEBUG else 'PRODUCTION'} mode")
 logger.info(f"Database URL: {DATABASE_URL}")
