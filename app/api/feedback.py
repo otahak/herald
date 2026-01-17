@@ -53,7 +53,7 @@ class FeedbackController(Controller):
         session.add(feedback)
         await session.commit()
         
-        logger.info(f"Feedback saved to database with ID: {feedback.id}")
+        logger.info(f"Feedback saved to database from {data.email}")
         
         return FeedbackResponse(
             success=True,

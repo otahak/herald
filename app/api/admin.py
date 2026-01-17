@@ -1,11 +1,12 @@
 """Admin API endpoints."""
 
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from litestar import Controller, get, patch
-from litestar.exceptions import HTTPException
+from litestar import Controller, get, patch, delete
+from litestar.exceptions import HTTPException, NotFoundException
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from pydantic import BaseModel
 from sqlalchemy import select, func, desc
@@ -112,7 +113,7 @@ class AdminController(Controller):
     @patch("/feedback/{feedback_id:uuid}/read")
     async def mark_feedback_read(
         self,
-        feedback_id: str,
+        feedback_id: uuid.UUID,
         session: AsyncSession,
     ) -> dict:
         """Mark feedback as read."""
@@ -128,6 +129,40 @@ class AdminController(Controller):
         await session.commit()
         
         return {"success": True}
+    
+    @delete("/feedback/{feedback_id:uuid}", status_code=200)
+    async def delete_feedback(
+        self,
+        feedback_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> dict:
+        """Delete a feedback submission."""
+        try:
+            result = await session.execute(
+                select(Feedback).where(Feedback.id == feedback_id)
+            )
+            feedback = result.scalar_one_or_none()
+            
+            if not feedback:
+                raise NotFoundException("Feedback not found")
+            
+            await session.delete(feedback)
+            await session.commit()
+            
+            logger.info(f"Feedback deleted: {feedback_id}")
+            return {"success": True, "message": "Feedback deleted successfully"}
+        except NotFoundException:
+            raise
+        except Exception as e:
+            error_log(
+                "Error deleting feedback",
+                exc=e,
+                context={"feedback_id": feedback_id, "endpoint": "delete_feedback"}
+            )
+            raise HTTPException(
+                detail=f"Error deleting feedback: {str(e)}",
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @get("/stats")
     async def get_stats(
