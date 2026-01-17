@@ -15,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
+# Import models to use their metadata for table creation
+from app.models.game import Game
+from app.models.player import Player
+
 # Load DATABASE_URL from environment or .env file
 PROJECT_ROOT = Path(__file__).parent.parent
 database_url = os.getenv("DATABASE_URL")
