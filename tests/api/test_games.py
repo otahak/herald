@@ -810,3 +810,291 @@ async def test_shaken_unshaken_logging(client):
     assert len(cleared_events) > 0
     assert any(e.get("target_unit_id") == unit_id for e in cleared_events)
 
+
+@pytest.mark.asyncio
+async def test_army_forge_import_accumulates_units(client):
+    """Test that Army Forge import adds units instead of replacing them."""
+    # Create game and join second player
+    resp = await client.post(
+        "/api/games",
+        json={"name": "AccumulateTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # First import
+    fake_units_1 = [
+        {
+            "name": "First Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "cost": 100,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        }
+    ]
+    
+    async def fake_get_1(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units_1}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get_1)), patch(
+        "app.api.proxy.broadcast_to_game", new=AsyncMock()
+    ):
+        resp_import1 = await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
+        )
+        assert resp_import1.status_code in (200, 201)
+        assert resp_import1.json()["units_imported"] == 1
+    
+    # Verify first unit is present
+    game_resp1 = await client.get(f"/api/games/{code}")
+    units1 = game_resp1.json().get("units", [])
+    assert len(units1) == 1
+    assert any(u["name"] == "First Unit" for u in units1)
+    
+    # Second import (should accumulate)
+    fake_units_2 = [
+        {
+            "name": "Second Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "cost": 150,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+        }
+    ]
+    
+    async def fake_get_2(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units_2}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get_2)), patch(
+        "app.api.proxy.broadcast_to_game", new=AsyncMock()
+    ):
+        resp_import2 = await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE67890", "player_id": host_id},
+        )
+        assert resp_import2.status_code in (200, 201)
+        assert resp_import2.json()["units_imported"] == 1
+    
+    # Verify both units are present (accumulated)
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    assert len(units2) == 2
+    assert any(u["name"] == "First Unit" for u in units2)
+    assert any(u["name"] == "Second Unit" for u in units2)
+    
+    # Verify player stats accumulated
+    players = game_resp2.json().get("players", [])
+    host_player = next((p for p in players if p["id"] == host_id), None)
+    assert host_player is not None
+    assert host_player["starting_unit_count"] == 2
+    assert host_player["starting_points"] == 250  # 100 + 150
+
+
+@pytest.mark.asyncio
+async def test_clear_all_units_success(client):
+    """Test clearing all units for a player."""
+    # Create game and join second player
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ClearTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Import units
+    fake_units = [
+        {
+            "name": "Unit 1",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "cost": 100,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u1",
+            "selectionId": "s1",
+        },
+        {
+            "name": "Unit 2",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "cost": 150,
+            "rules": [],
+            "selectedUpgrades": [],
+            "id": "u2",
+            "selectionId": "s2",
+        }
+    ]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)), patch(
+        "app.api.proxy.broadcast_to_game", new=AsyncMock()
+    ):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
+        )
+    
+    # Verify units exist
+    game_resp = await client.get(f"/api/games/{code}")
+    units = game_resp.json().get("units", [])
+    assert len(units) == 2
+    
+    # Clear all units
+    with patch("app.api.games.broadcast_to_game", new=AsyncMock()) as mock_broadcast:
+        resp_clear = await client.delete(f"/api/games/{code}/players/{host_id}/units")
+        assert resp_clear.status_code == 200
+        data = resp_clear.json()
+        assert data["success"] is True
+        assert data["units_cleared"] == 2
+        assert "2 units" in data["message"]
+        
+        # Verify broadcast was called
+        mock_broadcast.assert_awaited_once()
+        args, kwargs = mock_broadcast.await_args
+        assert args[0] == code
+        assert args[1]["type"] == "state_update"
+        assert args[1]["data"]["reason"] == "units_cleared"
+    
+    # Verify units are gone
+    game_resp2 = await client.get(f"/api/games/{code}")
+    units2 = game_resp2.json().get("units", [])
+    assert len(units2) == 0
+    
+    # Verify player stats reset
+    players = game_resp2.json().get("players", [])
+    host_player = next((p for p in players if p["id"] == host_id), None)
+    assert host_player is not None
+    assert host_player["starting_unit_count"] == 0
+    assert host_player["starting_points"] == 0
+    assert host_player["army_name"] is None
+    
+    # Verify event was created
+    resp_events = await client.get(f"/api/games/{code}/events")
+    events = resp_events.json()
+    clear_events = [e for e in events if "cleared all units" in e.get("description", "").lower()]
+    assert len(clear_events) > 0
+    clear_event = clear_events[0]
+    assert clear_event["event_type"] == "custom"
+    assert clear_event["details"]["units_cleared"] == 2
+    assert clear_event["details"]["points_cleared"] == 250
+
+
+@pytest.mark.asyncio
+async def test_clear_all_units_blocked_when_game_started(client):
+    """Test that clearing units is blocked when game has started."""
+    # Create game, join, and add units
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ClearBlockedTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    guest_id = (await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )).json()["your_player_id"]
+    
+    # Add units for both players (required to start game)
+    fake_units = [{
+        "name": "Test Unit",
+        "quality": 4,
+        "defense": 4,
+        "size": 1,
+        "cost": 100,
+        "rules": [],
+        "selectedUpgrades": [],
+        "id": "u1",
+        "selectionId": "s1",
+    }]
+    
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units}
+        return FakeResponse()
+    
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)), patch(
+        "app.api.proxy.broadcast_to_game", new=AsyncMock()
+    ):
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE12345", "player_id": host_id},
+        )
+        await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE67890", "player_id": guest_id},
+        )
+    
+    # Start game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Try to clear units - should fail
+    resp_clear = await client.delete(f"/api/games/{code}/players/{host_id}/units")
+    assert resp_clear.status_code in (400, 422)
+    assert "lobby" in resp_clear.json().get("detail", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_clear_all_units_with_no_units(client):
+    """Test clearing units when player has no units."""
+    # Create game and join second player
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ClearEmptyTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    
+    # Clear units when player has none
+    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+        resp_clear = await client.delete(f"/api/games/{code}/players/{host_id}/units")
+        assert resp_clear.status_code == 200
+        data = resp_clear.json()
+        assert data["success"] is True
+        assert data["units_cleared"] == 0
+

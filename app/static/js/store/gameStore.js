@@ -263,6 +263,82 @@ const GameStore = {
         },
         
         /**
+         * Create a unit manually
+         */
+        async createUnitManually(code, unitData) {
+            GameStore.state.isLoading = true;
+            GameStore.state.error = null;
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/manual`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        player_id: GameStore.state.currentPlayerId,
+                        ...unitData,
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to create unit');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state to get new unit
+                await this.fetchGame(code);
+                
+                // Broadcast to other players via WebSocket
+                this.broadcastStateUpdate({ type: 'unit_created' });
+                
+                return result;
+            } catch (error) {
+                GameStore.state.error = error.message;
+                throw error;
+            } finally {
+                GameStore.state.isLoading = false;
+            }
+        },
+        
+        /**
+         * Clear all units for the current player
+         */
+        async clearAllUnits(code, playerId) {
+            GameStore.state.isLoading = true;
+            GameStore.state.error = null;
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/players/${playerId}/units`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to clear units');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state to reflect cleared units
+                await this.fetchGame(code);
+                
+                // Broadcast to other players via WebSocket
+                this.broadcastStateUpdate({ type: 'units_cleared' });
+                
+                return result;
+            } catch (error) {
+                GameStore.state.error = error.message;
+                throw error;
+            } finally {
+                GameStore.state.isLoading = false;
+            }
+        },
+        
+        /**
          * Update unit state
          */
         async updateUnit(unitId, changes) {

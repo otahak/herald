@@ -292,16 +292,6 @@ class ProxyController(Controller):
             logger.warning(f"Player {data.player_id} not found in game {game_code}")
             raise NotFoundException(f"Player {data.player_id} not found in game")
         
-        # Clear existing units for this player using a separate query
-        existing_units_stmt = select(Unit).where(Unit.player_id == player.id)
-        existing_units_result = await session.execute(existing_units_stmt)
-        existing_units = existing_units_result.scalars().all()
-        
-        if existing_units:
-            logger.info(f"Clearing {len(existing_units)} existing units for player {player.name}")
-            for unit in existing_units:
-                await session.delete(unit)
-        
         # Extract list ID and fetch from Army Forge
         try:
             list_id = extract_list_id(data.army_forge_url)
@@ -437,12 +427,13 @@ class ProxyController(Controller):
         game_code = game.code  # cache code to avoid lazy load after commit
         current_round = game.current_round
         
-        # Update player
+        # Update player stats (accumulate instead of replace)
         player.army_forge_list_id = list_id
         army_name = f"Imported Army ({units_created} units)"
         player.army_name = army_name
-        player.starting_unit_count = units_created
-        player.starting_points = total_points
+        # Accumulate units and points instead of replacing
+        player.starting_unit_count = (player.starting_unit_count or 0) + units_created
+        player.starting_points = (player.starting_points or 0) + total_points
         
         # Log the import - create event directly to avoid relationship access
         event = GameEvent(
