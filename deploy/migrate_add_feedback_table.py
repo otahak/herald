@@ -114,8 +114,28 @@ async def main():
                 exists = result.scalar()
                 
                 if exists:
-                    print("✓ Feedback table already exists, skipping migration")
-                    return
+                    # Check current owner
+                    owner_stmt = text("""
+                        SELECT tableowner 
+                        FROM pg_tables 
+                        WHERE schemaname = 'public' 
+                        AND tablename = 'feedback';
+                    """)
+                    owner_result = await session.execute(owner_stmt)
+                    current_owner = owner_result.scalar()
+                    
+                    # Get the database user from connection
+                    current_user_stmt = text("SELECT current_user;")
+                    user_result = await session.execute(current_user_stmt)
+                    db_user = user_result.scalar()
+                    
+                    if current_owner == db_user:
+                        print(f"✓ Feedback table already exists and is owned by {db_user}, skipping migration")
+                        return
+                    else:
+                        print(f"⚠ Feedback table exists but owned by {current_owner}, not {db_user}")
+                        print("  Dropping and recreating table to fix ownership...")
+                        # Will drop and recreate below
                 
                 print("Creating feedback table...")
                 
