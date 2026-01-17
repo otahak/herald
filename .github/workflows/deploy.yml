@@ -128,10 +128,22 @@ jobs:
             
             # Update .env file with secrets from GitHub
             echo "Updating .env file with environment variables..."
-            mv /tmp/herald.env /opt/herald/.env
+            
+            # CRITICAL: Remove any leading/trailing spaces from the .env file
+            # systemd's EnvironmentFile is very strict and will ignore lines with leading spaces
+            sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/herald.env | grep -v '^$' > /tmp/herald.env.clean
+            
+            # Verify the cleaned file
+            if grep -q "^[[:space:]]" /tmp/herald.env.clean; then
+              echo "ERROR: Cleaned .env file still has leading spaces - this should not happen!"
+              exit 1
+            fi
+            
+            # Move cleaned file to final location
+            mv /tmp/herald.env.clean /opt/herald/.env
             chown herald:herald /opt/herald/.env
             chmod 600 /opt/herald/.env
-            echo "✓ .env file updated"
+            echo "✓ .env file updated and cleaned (removed leading/trailing spaces)"
             
             # Verify .env file format (no leading spaces, proper KEY=VALUE format)
             echo "Verifying .env file format..."
@@ -150,6 +162,21 @@ jobs:
               exit 1
             fi
             echo "✓ .env file format verified (no leading spaces, required keys present)"
+            
+            # Show first line of each key to verify values are present (without showing full secrets)
+            echo "Verifying values are non-empty:"
+            if grep -q "^GOOGLE_CLIENT_ID=.\+" /opt/herald/.env; then
+              echo "  ✓ GOOGLE_CLIENT_ID has a value"
+            else
+              echo "  ✗ ERROR: GOOGLE_CLIENT_ID appears to be empty!"
+              exit 1
+            fi
+            if grep -q "^GOOGLE_CLIENT_SECRET=.\+" /opt/herald/.env; then
+              echo "  ✓ GOOGLE_CLIENT_SECRET has a value"
+            else
+              echo "  ✗ ERROR: GOOGLE_CLIENT_SECRET appears to be empty!"
+              exit 1
+            fi
             
             # Branch is passed as environment variable
             echo "Deploying branch: ${DEPLOY_BRANCH:-main}"
