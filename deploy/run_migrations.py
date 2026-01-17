@@ -109,7 +109,7 @@ def _parse_database_url(database_url: str) -> tuple[str, str, str]:
     return db_name, user, urlunparse(parsed._replace(path="/postgres"))
 
 async def reset_database(database_url: str) -> None:
-    """Drop and recreate the database on every run."""
+    """Drop and recreate the database (destructive operation)."""
     db_name, db_user, admin_url = _parse_database_url(database_url)
     _validate_identifier(db_name, "database name")
     _validate_identifier(db_user, "database user")
