@@ -108,14 +108,23 @@ async def admin_login(request: Request) -> Redirect:
         logger.info(f"OAuth redirect URI: {redirect_uri}")
         
         client = await get_oauth_client(request)
-        auth_url, _ = client.create_authorization_url(
-            GOOGLE_AUTHORIZATION_BASE_URL,
-            state=state,
-            scope="openid email profile",
-        )
+        try:
+            auth_url, _ = client.create_authorization_url(
+                GOOGLE_AUTHORIZATION_BASE_URL,
+                state=state,
+                scope="openid email profile",
+            )
+        except Exception as e:
+            logger.error(f"Failed to create OAuth authorization URL: {e}")
+            logger.exception("Full traceback:")
+            raise NotAuthorizedException(f"Failed to create OAuth URL: {e}")
         
         logger.info(f"Created OAuth authorization URL, redirecting to Google")
-        logger.debug(f"Authorization URL: {auth_url[:100]}...")
+        logger.info(f"Authorization URL: {auth_url}")
+        
+        if not auth_url or not auth_url.startswith("http"):
+            logger.error(f"Invalid OAuth authorization URL: {auth_url}")
+            raise NotAuthorizedException("Invalid OAuth authorization URL")
         
         response = Redirect(auth_url)
         # Always set the cookie to ensure it's sent back
@@ -245,7 +254,9 @@ async def admin_callback(request: Request) -> Redirect | Response:
         
         logger.info(f"Admin authenticated: {email}")
         
-        return Redirect("/admin")
+        # Redirect to admin dashboard with base path
+        base_path = get_base_path(request)
+        return Redirect(f"{base_path}/admin")
         
     except Exception as e:
         logger.exception("OAuth token exchange failed")
