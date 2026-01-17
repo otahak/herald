@@ -234,7 +234,11 @@ const app = createApp({
             this.error = null;
             try {
                 const response = await fetch(`${this.basePath}/api/admin/stats`);
-                if (!response.ok) throw new Error('Failed to load statistics');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+                    const errorMsg = errorData.detail?.error || errorData.detail || `HTTP ${response.status}`;
+                    throw new Error(errorMsg);
+                }
                 this.stats = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load statistics';
@@ -249,7 +253,11 @@ const app = createApp({
             try {
                 const url = `${this.basePath}/api/admin/feedback${this.showUnreadOnly ? '?unread_only=true' : ''}`;
                 const response = await fetch(url);
-                if (!response.ok) throw new Error('Failed to load feedback');
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+                    const errorMsg = errorData.detail?.error || errorData.detail || `HTTP ${response.status}`;
+                    throw new Error(errorMsg);
+                }
                 this.feedbackList = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load feedback';

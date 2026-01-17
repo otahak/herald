@@ -134,6 +134,7 @@ class AdminController(Controller):
         session: AsyncSession,
     ) -> StatsResponse:
         """Get admin statistics."""
+        logger.info("Fetching admin statistics")
         try:
             # Total games
             total_games_result = await session.execute(
@@ -196,22 +197,23 @@ class AdminController(Controller):
                 games_last_7d=games_last_7d,
             )
         except (OperationalError, ProgrammingError) as e:
-            logger.exception(f"Database error fetching stats: {e}")
+            error_msg = str(e)
+            logger.exception(f"Database error fetching stats: {error_msg}")
             # Check if it's a missing table error
-            error_msg = str(e).lower()
-            if "does not exist" in error_msg or "no such table" in error_msg:
+            if "does not exist" in error_msg.lower() or "no such table" in error_msg.lower():
                 raise HTTPException(
-                    detail="Database tables do not exist. Please run database migrations.",
+                    detail={"error": "Database tables do not exist. Please run database migrations.", "type": "missing_table"},
                     status_code=HTTP_500_INTERNAL_SERVER_ERROR
                 )
             raise HTTPException(
-                detail=f"Database error: {str(e)}",
+                detail={"error": f"Database error: {error_msg}", "type": "database_error"},
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR
             )
         except Exception as e:
-            logger.exception(f"Error fetching stats: {e}")
+            error_msg = str(e)
+            logger.exception(f"Error fetching stats: {error_msg}")
             raise HTTPException(
-                detail=f"Error fetching stats: {str(e)}",
+                detail={"error": f"Error fetching stats: {error_msg}", "type": "unknown_error"},
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR
             )
     
