@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
 # Import models to use their metadata for table creation
+from app.models import Base
 from app.models.game import Game
 from app.models.player import Player
 from app.models.unit import Unit
@@ -105,21 +106,13 @@ async def migrate():
             
             if not table_exists:
                 print("Table 'units' does not exist. Creating it with base schema...")
-                # Ensure dependencies exist first
-                games_check = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'games');")
-                games_exists = (await conn.execute(games_check)).scalar()
-                if not games_exists:
-                    print("  Creating 'games' table (dependency)...")
-                    await conn.run_sync(Game.__table__.create, checkfirst=True)
-                
-                players_check = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'players');")
-                players_exists = (await conn.execute(players_check)).scalar()
-                if not players_exists:
-                    print("  Creating 'players' table (dependency)...")
-                    await conn.run_sync(Player.__table__.create, checkfirst=True)
-                
-                # Create units table with all columns (including attached_to_unit_id from model)
-                await conn.run_sync(Unit.__table__.create, checkfirst=True)
+                # Use Base.metadata.create_all to create tables in proper order with foreign keys
+                # This ensures dependencies are created first
+                await conn.run_sync(
+                    Base.metadata.create_all,
+                    tables=[Game.__table__, Player.__table__, Unit.__table__],
+                    checkfirst=True
+                )
                 print("✓ Created 'units' table with all columns (including attached_to_unit_id)")
                 
                 # Create index for the column (since table was just created, index may not exist)
