@@ -112,7 +112,7 @@ template_dirs = [
 
 def register_template_globals(engine: JinjaTemplateEngine) -> None:
     """Register template globals and callables."""
-    from app.auth.oauth import get_base_path
+    from app.utils import get_base_path
     
     def base_path_helper(ctx: dict[str, Any]) -> str:
         """Helper to get base path from request in templates."""
@@ -122,10 +122,6 @@ def register_template_globals(engine: JinjaTemplateEngine) -> None:
             try:
                 return get_base_path(request)
             except Exception:
-                # Fallback if get_base_path fails
-                path = getattr(request, "url", {}).path if hasattr(request, "url") else ""
-                if "/admin" in str(path):
-                    return str(path)[:str(path).index("/admin")]
                 return ""
         return ""
     
@@ -153,7 +149,7 @@ def log_exceptions(request: Request, exc: Exception) -> Response:
 def handle_auth_exception(request: Request, exc: NotAuthorizedException) -> Response:
     """Handle authentication failures by redirecting to login for pages, JSON for API."""
     from litestar.response import Redirect
-    from app.auth.oauth import get_base_path
+    from app.utils import get_base_path
     path = request.url.path
     
     # API routes should return JSON, not redirect

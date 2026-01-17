@@ -13,6 +13,8 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.response import Redirect, Response
 from litestar.stores.memory import MemoryStore
 
+from app.utils import get_base_path
+
 logger = logging.getLogger("Herald.auth")
 
 # OAuth configuration
@@ -40,15 +42,6 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 # Session store (in-memory for now, can be upgraded to Redis later)
 session_store = MemoryStore()
-
-
-def get_base_path(request: Request) -> str:
-    """Extract the base path from the request (e.g., '/herald' if app is served at /herald)."""
-    path = request.url.path
-    # Find the base path by looking for /admin in the path
-    if "/admin" in path:
-        return path[:path.index("/admin")]
-    return ""
 
 
 def get_redirect_uri(request: Request) -> str:

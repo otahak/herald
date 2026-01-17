@@ -9,7 +9,7 @@ from app.auth.oauth import require_admin_guard, admin_login, admin_callback, adm
 @get("/admin", guards=[require_admin_guard])
 async def admin_dashboard(request: Request) -> Template:
     """Admin dashboard page (requires authentication)."""
-    from app.auth.oauth import get_base_path
+    from app.utils import get_base_path
     base_path = get_base_path(request)
     return Template(template_name="admin/dashboard.html", context={"base_path": base_path})
 
@@ -17,7 +17,7 @@ async def admin_dashboard(request: Request) -> Template:
 @get("/admin/login-page")
 async def admin_login_page(request: Request) -> Template:
     """Admin login page (shown when not authenticated)."""
-    from app.auth.oauth import get_base_path
+    from app.utils import get_base_path
     base_path = get_base_path(request)
     return Template(template_name="admin/login.html", context={"base_path": base_path})
 
