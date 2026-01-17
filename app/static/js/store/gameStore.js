@@ -180,7 +180,7 @@ const GameStore = {
                 
                 // Use the player ID returned by the server
                 GameStore.state.currentPlayerId = game.your_player_id;
-                console.log('Joined as player:', game.your_player_id);
+                Debug.log('Joined as player:', game.your_player_id);
                 
                 return game;
             } catch (error) {
@@ -252,6 +252,82 @@ const GameStore = {
                 
                 // Broadcast to other players via WebSocket
                 this.broadcastStateUpdate({ type: 'army_imported' });
+                
+                return result;
+            } catch (error) {
+                GameStore.state.error = error.message;
+                throw error;
+            } finally {
+                GameStore.state.isLoading = false;
+            }
+        },
+        
+        /**
+         * Create a unit manually
+         */
+        async createUnitManually(code, unitData) {
+            GameStore.state.isLoading = true;
+            GameStore.state.error = null;
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/manual`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        player_id: GameStore.state.currentPlayerId,
+                        ...unitData,
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to create unit');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state to get new unit
+                await this.fetchGame(code);
+                
+                // Broadcast to other players via WebSocket
+                this.broadcastStateUpdate({ type: 'unit_created' });
+                
+                return result;
+            } catch (error) {
+                GameStore.state.error = error.message;
+                throw error;
+            } finally {
+                GameStore.state.isLoading = false;
+            }
+        },
+        
+        /**
+         * Clear all units for the current player
+         */
+        async clearAllUnits(code, playerId) {
+            GameStore.state.isLoading = true;
+            GameStore.state.error = null;
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/players/${playerId}/units`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to clear units');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state to reflect cleared units
+                await this.fetchGame(code);
+                
+                // Broadcast to other players via WebSocket
+                this.broadcastStateUpdate({ type: 'units_cleared' });
                 
                 return result;
             } catch (error) {
@@ -515,7 +591,7 @@ const GameStore = {
             };
             
             ws.onclose = () => {
-                console.log('WebSocket disconnected');
+                Debug.log('WebSocket disconnected');
                 GameStore.state.isConnected = false;
                 GameStore.state.ws = null;
                 
@@ -523,13 +599,13 @@ const GameStore = {
                 if (GameStore.state.reconnectAttempts < GameStore.state.maxReconnectAttempts) {
                     GameStore.state.reconnectAttempts++;
                     const delay = Math.min(1000 * Math.pow(2, GameStore.state.reconnectAttempts), 30000);
-                    console.log(`Reconnecting in ${delay}ms...`);
+                    Debug.log(`Reconnecting in ${delay}ms...`);
                     setTimeout(() => this.connectWebSocket(code), delay);
                 }
             };
             
             ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
+                Debug.error('WebSocket error:', error);
             };
             
             GameStore.state.ws = ws;
@@ -539,7 +615,7 @@ const GameStore = {
          * Handle incoming WebSocket messages
          */
         handleWebSocketMessage(message) {
-            console.log('WS message:', message.type, message);
+            Debug.log('WS message:', message.type, message);
             
             switch (message.type) {
                 case 'state':
@@ -596,7 +672,7 @@ const GameStore = {
                         this.fetchGame(GameStore.state.game.code);
                         this.fetchEvents();
                     }
-                    console.log('Player joined:', message.player.name);
+                    Debug.log('Player joined:', message.player.name);
                     break;
                 
                 case 'player_left':
@@ -665,7 +741,7 @@ const GameStore = {
                 savedAt: new Date().toISOString(),
             };
             localStorage.setItem('herald_player_identities', JSON.stringify(identities));
-            console.log(`Saved player identity: ${playerName} for game ${gameCode}`);
+            Debug.log(`Saved player identity: ${playerName} for game ${gameCode}`);
         },
         
         /**
@@ -699,7 +775,7 @@ const GameStore = {
                 
                 if (player) {
                     GameStore.state.currentPlayerId = saved.playerId;
-                    console.log(`Restored identity: ${player.name}`);
+                    Debug.log(`Restored identity: ${player.name}`);
                     return player;
                 } else {
                     // Player no longer in game, clear identity

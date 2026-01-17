@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Game, Player, GameEvent, EventType
+from app.utils.logging import error_log, log_exception_with_context
 
 logger = logging.getLogger("Herald.WebSocket")
 
@@ -382,7 +383,14 @@ async def game_websocket(
                 
                 logger.info(f"Player {player_id} left game {code}")
             except Exception as e:
-                logger.error(f"Error updating player status: {e}")
+                error_log(
+                    "Error updating player status on disconnect",
+                    exc=e,
+                    context={
+                        "game_code": code,
+                        "player_id": str(player_id) if player_id else None,
+                    }
+                )
         else:
             logger.info(f"Anonymous WebSocket disconnected from game {code}")
         

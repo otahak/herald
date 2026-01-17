@@ -311,6 +311,23 @@
                     <div class="divider text-xs">or</div>
                     
                     <button 
+                        class="btn btn-sm btn-block btn-outline mb-2"
+                        @click="showManualUnitModal = true"
+                    >
+                        Add Unit Manually
+                    </button>
+                    
+                    <button 
+                        v-if="currentPlayerId && getPlayerUnits(currentPlayerId).length > 0"
+                        class="btn btn-sm btn-block btn-error btn-outline mb-2"
+                        @click="showClearUnitsModal = true"
+                    >
+                        Clear All Units
+                    </button>
+                    
+                    <div class="divider text-xs">or</div>
+                    
+                    <button 
                         class="btn btn-sm btn-block btn-primary"
                         :disabled="players.length < 2 || !hasUnits"
                         @click="startGame"
@@ -469,6 +486,308 @@
             </div>
         </div>
         <div class="modal-backdrop bg-black/50"></div>
+    </dialog>
+    
+    <!-- Manual Unit Entry Modal -->
+    <dialog v-if="showManualUnitModal" :open="showManualUnitModal" class="modal modal-open">
+        <div class="modal-box max-w-2xl max-h-[90vh] overflow-y-auto">
+            <h3 class="font-bold text-lg mb-4">Add Unit Manually</h3>
+            
+            <form @submit.prevent="submitManualUnit" class="space-y-4">
+                <!-- Basic Info -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Unit Name *</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        v-model="manualUnitForm.name"
+                        placeholder="e.g., Tactical Squad"
+                        class="input input-bordered"
+                        required
+                        maxlength="100"
+                    />
+                </div>
+                
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Custom Name (optional)</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        v-model="manualUnitForm.custom_name"
+                        placeholder="e.g., Alpha Squad"
+                        class="input input-bordered"
+                        maxlength="100"
+                    />
+                </div>
+                
+                <!-- Stats -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Quality *</span>
+                        </label>
+                        <input 
+                            type="number" 
+                            v-model.number="manualUnitForm.quality"
+                            min="2" 
+                            max="6" 
+                            class="input input-bordered"
+                            required
+                        />
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Defense *</span>
+                        </label>
+                        <input 
+                            type="number" 
+                            v-model.number="manualUnitForm.defense"
+                            min="2" 
+                            max="6" 
+                            class="input input-bordered"
+                            required
+                        />
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Size *</span>
+                        </label>
+                        <input 
+                            type="number" 
+                            v-model.number="manualUnitForm.size"
+                            min="1" 
+                            class="input input-bordered"
+                            required
+                        />
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Tough *</span>
+                        </label>
+                        <input 
+                            type="number" 
+                            v-model.number="manualUnitForm.tough"
+                            min="1" 
+                            class="input input-bordered"
+                            required
+                        />
+                    </div>
+                    
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Cost *</span>
+                        </label>
+                        <input 
+                            type="number" 
+                            v-model.number="manualUnitForm.cost"
+                            min="0" 
+                            class="input input-bordered"
+                            required
+                        />
+                    </div>
+                </div>
+                
+                <!-- Special Flags -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Special Properties</span>
+                    </label>
+                    <div class="space-y-2">
+                        <label class="label cursor-pointer">
+                            <span class="label-text">Hero</span>
+                            <input 
+                                type="checkbox" 
+                                v-model="manualUnitForm.is_hero"
+                                class="checkbox"
+                            />
+                        </label>
+                        
+                        <label class="label cursor-pointer">
+                            <span class="label-text">Caster</span>
+                            <input 
+                                type="checkbox" 
+                                v-model="manualUnitForm.is_caster"
+                                class="checkbox"
+                            />
+                        </label>
+                        <div v-if="manualUnitForm.is_caster" class="ml-6">
+                            <label class="label">
+                                <span class="label-text">Caster Level</span>
+                            </label>
+                            <input 
+                                type="number" 
+                                v-model.number="manualUnitForm.caster_level"
+                                min="0" 
+                                max="6" 
+                                class="input input-bordered input-sm"
+                            />
+                        </div>
+                        
+                        <label class="label cursor-pointer">
+                            <span class="label-text">Transport</span>
+                            <input 
+                                type="checkbox" 
+                                v-model="manualUnitForm.is_transport"
+                                class="checkbox"
+                            />
+                        </label>
+                        <div v-if="manualUnitForm.is_transport" class="ml-6">
+                            <label class="label">
+                                <span class="label-text">Transport Capacity</span>
+                            </label>
+                            <input 
+                                type="number" 
+                                v-model.number="manualUnitForm.transport_capacity"
+                                min="0" 
+                                class="input input-bordered input-sm"
+                            />
+                        </div>
+                        
+                        <label class="label cursor-pointer">
+                            <span class="label-text">Ambush</span>
+                            <input 
+                                type="checkbox" 
+                                v-model="manualUnitForm.has_ambush"
+                                class="checkbox"
+                            />
+                        </label>
+                        
+                        <label class="label cursor-pointer">
+                            <span class="label-text">Scout</span>
+                            <input 
+                                type="checkbox" 
+                                v-model="manualUnitForm.has_scout"
+                                class="checkbox"
+                            />
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Attachment -->
+                <div v-if="currentPlayerId && getPlayerUnits(currentPlayerId).length > 0" class="form-control">
+                    <label class="label">
+                        <span class="label-text">Attach to Unit (optional)</span>
+                    </label>
+                    <select 
+                        v-model="manualUnitForm.attached_to_unit_id"
+                        class="select select-bordered"
+                    >
+                        <option :value="null">None (independent unit)</option>
+                        <option 
+                            v-for="unit in getPlayerUnits(currentPlayerId)"
+                            :key="unit.id"
+                            :value="unit.id"
+                        >
+                            [[ unit.custom_name || unit.name ]]
+                        </option>
+                    </select>
+                </div>
+                
+                <!-- Advanced (JSON) -->
+                <div class="collapse collapse-arrow bg-base-200">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced: Loadout & Rules (JSON)
+                    </div>
+                    <div class="collapse-content space-y-2">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text text-xs">Loadout (JSON array)</span>
+                            </label>
+                            <textarea 
+                                v-model="manualUnitForm.loadout_json"
+                                placeholder='[{"name": "Rifle", "attacks": 1}]'
+                                class="textarea textarea-bordered textarea-sm font-mono text-xs"
+                                rows="3"
+                            ></textarea>
+                        </div>
+                        
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text text-xs">Rules (JSON array)</span>
+                            </label>
+                            <textarea 
+                                v-model="manualUnitForm.rules_json"
+                                placeholder='[{"name": "Hero", "rating": null}]'
+                                class="textarea textarea-bordered textarea-sm font-mono text-xs"
+                                rows="3"
+                            ></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Actions -->
+                <div class="modal-action">
+                    <button 
+                        type="button"
+                        class="btn btn-ghost"
+                        @click="showManualUnitModal = false"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        type="submit"
+                        class="btn btn-primary"
+                        :disabled="isCreatingUnit"
+                        :class="{ 'loading': isCreatingUnit }"
+                    >
+                        Add Unit
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showManualUnitModal = false"></div>
+    </dialog>
+    
+    <!-- Clear Units Confirmation Modal -->
+    <dialog v-if="showClearUnitsModal" :open="showClearUnitsModal" class="modal modal-open">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">Clear All Units?</h3>
+            
+            <div class="space-y-4">
+                <div class="alert alert-warning">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span>Are you sure you want to clear all your units? This action cannot be undone.</span>
+                </div>
+                
+                <div v-if="currentPlayerId" class="bg-base-200 p-4 rounded-lg">
+                    <p class="text-sm">
+                        <strong>This will remove:</strong><br>
+                        [[ getPlayerUnits(currentPlayerId).length ]] unit(s)<br>
+                        <span v-if="getPlayerUnits(currentPlayerId).length > 0">
+                            [[ getPlayerUnits(currentPlayerId).reduce((sum, u) => sum + (u.cost || 0), 0) ]] points
+                        </span>
+                    </p>
+                </div>
+                
+                <div class="modal-action">
+                    <button 
+                        type="button"
+                        class="btn btn-ghost"
+                        @click="showClearUnitsModal = false"
+                    >
+                        Cancel
+                    </button>
+                    <button 
+                        type="button"
+                        class="btn btn-error"
+                        :disabled="isClearingUnits"
+                        :class="{ 'loading': isClearingUnits }"
+                        @click="confirmClearUnits"
+                    >
+                        Clear All Units
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showClearUnitsModal = false"></div>
     </dialog>
 </div>
 
@@ -706,7 +1025,7 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-    const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue;
+    const { createApp, ref, computed, reactive, onMounted, onUnmounted, watch } = Vue;
     
     const GAME_CODE = "{{ game_code }}";
     
@@ -979,6 +1298,29 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const armyForgeUrl = ref('');
             const isImporting = ref(false);
+            const showManualUnitModal = ref(false);
+            const isCreatingUnit = ref(false);
+            const showClearUnitsModal = ref(false);
+            const isClearingUnits = ref(false);
+            const manualUnitForm = reactive({
+                name: '',
+                custom_name: '',
+                quality: 4,
+                defense: 4,
+                size: 1,
+                tough: 1,
+                cost: 0,
+                is_hero: false,
+                is_caster: false,
+                caster_level: 0,
+                is_transport: false,
+                transport_capacity: 0,
+                has_ambush: false,
+                has_scout: false,
+                attached_to_unit_id: null,
+                loadout_json: '',
+                rules_json: '',
+            });
             
             // Helper to get base path based on environment
             const getBasePath = () => {
@@ -1176,6 +1518,106 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             };
             
+            const submitManualUnit = async () => {
+                if (!manualUnitForm.name) {
+                    alert('Unit name is required');
+                    return;
+                }
+                
+                isCreatingUnit.value = true;
+                try {
+                    // Parse JSON fields if provided
+                    let loadout = null;
+                    let rules = null;
+                    
+                    if (manualUnitForm.loadout_json && manualUnitForm.loadout_json.trim()) {
+                        try {
+                            loadout = JSON.parse(manualUnitForm.loadout_json.trim());
+                        } catch (e) {
+                            alert('Invalid loadout JSON: ' + e.message);
+                            isCreatingUnit.value = false;
+                            return;
+                        }
+                    }
+                    
+                    if (manualUnitForm.rules_json && manualUnitForm.rules_json.trim()) {
+                        try {
+                            rules = JSON.parse(manualUnitForm.rules_json.trim());
+                        } catch (e) {
+                            alert('Invalid rules JSON: ' + e.message);
+                            isCreatingUnit.value = false;
+                            return;
+                        }
+                    }
+                    
+                    // Build unit data
+                    const unitData = {
+                        name: manualUnitForm.name,
+                        custom_name: manualUnitForm.custom_name || null,
+                        quality: manualUnitForm.quality,
+                        defense: manualUnitForm.defense,
+                        size: manualUnitForm.size,
+                        tough: manualUnitForm.tough,
+                        cost: manualUnitForm.cost,
+                        loadout: loadout,
+                        rules: rules,
+                        is_hero: manualUnitForm.is_hero,
+                        is_caster: manualUnitForm.is_caster,
+                        caster_level: manualUnitForm.is_caster ? manualUnitForm.caster_level : 0,
+                        is_transport: manualUnitForm.is_transport,
+                        transport_capacity: manualUnitForm.is_transport ? manualUnitForm.transport_capacity : 0,
+                        has_ambush: manualUnitForm.has_ambush,
+                        has_scout: manualUnitForm.has_scout,
+                        attached_to_unit_id: manualUnitForm.attached_to_unit_id || null,
+                    };
+                    
+                    await store.actions.createUnitManually(GAME_CODE, unitData);
+                    
+                    // Reset form
+                    manualUnitForm.name = '';
+                    manualUnitForm.custom_name = '';
+                    manualUnitForm.quality = 4;
+                    manualUnitForm.defense = 4;
+                    manualUnitForm.size = 1;
+                    manualUnitForm.tough = 1;
+                    manualUnitForm.cost = 0;
+                    manualUnitForm.is_hero = false;
+                    manualUnitForm.is_caster = false;
+                    manualUnitForm.caster_level = 0;
+                    manualUnitForm.is_transport = false;
+                    manualUnitForm.transport_capacity = 0;
+                    manualUnitForm.has_ambush = false;
+                    manualUnitForm.has_scout = false;
+                    manualUnitForm.attached_to_unit_id = null;
+                    manualUnitForm.loadout_json = '';
+                    manualUnitForm.rules_json = '';
+                    
+                    // Close modal
+                    showManualUnitModal.value = false;
+                } catch (error) {
+                    alert('Failed to create unit: ' + error.message);
+                } finally {
+                    isCreatingUnit.value = false;
+                }
+            };
+            
+            const confirmClearUnits = async () => {
+                if (!currentPlayerId.value) {
+                    alert('No player selected');
+                    return;
+                }
+                
+                isClearingUnits.value = true;
+                try {
+                    await store.actions.clearAllUnits(GAME_CODE, currentPlayerId.value);
+                    showClearUnitsModal.value = false;
+                } catch (error) {
+                    alert('Failed to clear units: ' + error.message);
+                } finally {
+                    isClearingUnits.value = false;
+                }
+            };
+            
             const createObjectives = async () => {
                 try {
                     await store.actions.createObjectives(objectiveCount.value);
@@ -1325,7 +1767,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         const player = playersList.find(p => p.id === String(savedIdentity.playerId));
                         if (player) {
                             store.state.currentPlayerId = savedIdentity.playerId;
-                            console.log('Restored player identity:', player.name);
+                            Debug.log('Restored player identity:', player.name);
                             store.actions.connectWebSocket(GAME_CODE);
                             return;
                         } else {
@@ -1453,6 +1895,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 rightPlayer,
                 armyForgeUrl,
                 isImporting,
+                showManualUnitModal,
+                isCreatingUnit,
+                manualUnitForm,
+                showClearUnitsModal,
+                isClearingUnits,
+                confirmClearUnits,
                 showPlayerSelect,
                 availablePlayers,
                 allowNewPlayer,
@@ -1469,6 +1917,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 getPlayerUnits,
                 getAttachedHeroes,
                 getArmyHealth,
+                submitManualUnit,
                 isMoraleThreshold,
                 getHealthBarClass,
                 getPlayerVP,

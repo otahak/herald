@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Any
 
-from litestar import Controller, get, post, patch, delete
+from litestar import Controller, get, post, patch, delete, Request
 from litestar.dto import DTOConfig
 from litestar.exceptions import NotFoundException, ValidationException
 from pydantic import BaseModel, Field
@@ -21,6 +21,10 @@ from app.models import (
     GameEvent, EventType,
 )
 from app.api.websocket import broadcast_to_game
+from app.utils.logging import error_log, log_exception_with_context
+
+# Import parse_special_rules from proxy module for rule parsing
+from app.api.proxy import parse_special_rules
 
 logger = logging.getLogger("Herald.games")
 
@@ -81,6 +85,35 @@ class UpdateVictoryPointsRequest(BaseModel):
 class UpdateRoundRequest(BaseModel):
     """Request to update the game round."""
     delta: int = Field(description="Change in round (+1, -1, etc.)")
+
+
+class CreateUnitRequest(BaseModel):
+    """Request to create a unit manually."""
+    player_id: uuid.UUID = Field(..., description="Player ID who owns this unit")
+    name: str = Field(..., min_length=1, max_length=100, description="Unit name")
+    custom_name: Optional[str] = Field(None, max_length=100, description="Custom display name")
+    quality: int = Field(4, ge=2, le=6, description="Quality stat (2-6)")
+    defense: int = Field(4, ge=2, le=6, description="Defense stat (2-6)")
+    size: int = Field(1, ge=1, description="Number of models")
+    tough: int = Field(1, ge=1, description="Tough value")
+    cost: int = Field(0, ge=0, description="Point cost")
+    loadout: Optional[List[Any]] = Field(None, description="Weapon loadout (JSON)")
+    rules: Optional[List[Any]] = Field(None, description="Special rules (JSON)")
+    is_hero: bool = Field(False, description="Is this a hero unit")
+    is_caster: bool = Field(False, description="Is this a caster unit")
+    caster_level: int = Field(0, ge=0, le=6, description="Caster level (0-6)")
+    is_transport: bool = Field(False, description="Is this a transport unit")
+    transport_capacity: int = Field(0, ge=0, description="Transport capacity")
+    has_ambush: bool = Field(False, description="Has Ambush rule")
+    has_scout: bool = Field(False, description="Has Scout rule")
+    attached_to_unit_id: Optional[uuid.UUID] = Field(None, description="Attach to parent unit (for heroes)")
+
+
+class ClearUnitsResponse(BaseModel):
+    """Response after clearing all units."""
+    success: bool
+    units_cleared: int
+    message: str
 
 
 # --- Response Schemas ---
@@ -315,7 +348,15 @@ class GamesController(Controller):
             logger.info(f"Game created successfully: {game.code} (host: {player.name})")
             return GameResponse.model_validate(game)
         except Exception as e:
-            logger.error(f"Failed to create game: {str(e)}")
+            error_log(
+                "Failed to create game",
+                exc=e,
+                context={
+                    "game_name": data.name,
+                    "game_system": str(data.game_system) if data.game_system else "GFF",
+                    "player_name": data.player_name,
+                }
+            )
             raise
     
     @get("/{code:str}")
@@ -812,6 +853,291 @@ class GamesController(Controller):
         })
         
         return UnitResponse.model_validate(unit)
+    
+    @post("/{code:str}/units/manual")
+    async def create_unit_manually(
+        self,
+        code: str,
+        data: CreateUnitRequest,
+        session: AsyncSession,
+    ) -> UnitResponse:
+        """Create a unit manually (alternative to Army Forge import)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        
+        # Only allow in lobby status
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Units can only be added manually in the lobby")
+        
+        # Find the player
+        player = None
+        for p in game.players:
+            if p.id == data.player_id:
+                player = p
+                break
+        
+        if not player:
+            raise NotFoundException(f"Player {data.player_id} not found in game")
+        
+        # Cache player.id immediately after finding player to avoid accessing after commit
+        player_id = player.id
+        
+        # If rules are provided, parse them to potentially override flags
+        # But allow direct flag setting to take precedence
+        props = {
+            "is_hero": data.is_hero,
+            "is_caster": data.is_caster,
+            "caster_level": data.caster_level if data.is_caster else 0,
+            "is_transport": data.is_transport,
+            "transport_capacity": data.transport_capacity if data.is_transport else 0,
+            "has_ambush": data.has_ambush,
+            "has_scout": data.has_scout,
+            "tough": data.tough,
+        }
+        
+        # If rules are provided, parse them but let direct flags override
+        if data.rules:
+            parsed_props = parse_special_rules(data.rules)
+            # Only use parsed values if flags weren't explicitly set
+            if not data.is_hero:
+                props["is_hero"] = parsed_props["is_hero"]
+            if not data.is_caster:
+                props["is_caster"] = parsed_props["is_caster"]
+                props["caster_level"] = parsed_props["caster_level"]
+            if not data.is_transport:
+                props["is_transport"] = parsed_props["is_transport"]
+                props["transport_capacity"] = parsed_props["transport_capacity"]
+            if not data.has_ambush:
+                props["has_ambush"] = parsed_props["has_ambush"]
+            if not data.has_scout:
+                props["has_scout"] = parsed_props["has_scout"]
+        
+        # Validate attachment if provided
+        if data.attached_to_unit_id:
+            parent_unit = None
+            for p in game.players:
+                for u in p.units:
+                    if u.id == data.attached_to_unit_id:
+                        parent_unit = u
+                        break
+                if parent_unit:
+                    break
+            
+            if not parent_unit:
+                raise NotFoundException(f"Parent unit {data.attached_to_unit_id} not found")
+            
+            if parent_unit.player_id != data.player_id:
+                raise ValidationException("Cannot attach unit to a unit owned by another player")
+        
+        # Create the unit
+        unit = Unit(
+            player_id=player_id,  # Use cached value
+            name=data.name,
+            custom_name=data.custom_name,
+            quality=data.quality,
+            defense=data.defense,
+            size=data.size,
+            tough=props["tough"],
+            cost=data.cost,
+            loadout=data.loadout,
+            rules=data.rules,
+            is_hero=props["is_hero"],
+            is_caster=props["is_caster"],
+            caster_level=props["caster_level"],
+            is_transport=props["is_transport"],
+            transport_capacity=props["transport_capacity"],
+            has_ambush=props["has_ambush"],
+            has_scout=props["has_scout"],
+            attached_to_unit_id=data.attached_to_unit_id,
+        )
+        session.add(unit)
+        await session.flush()  # Get unit ID
+        
+        # Create initial state
+        initial_deployment = (
+            DeploymentStatus.IN_AMBUSH if props["has_ambush"]
+            else DeploymentStatus.DEPLOYED
+        )
+        
+        # Cache state values at creation time to avoid accessing after flush
+        state_models_remaining = unit.size
+        state_spell_tokens_val = props["caster_level"] if props["is_caster"] else 0
+        
+        state = UnitState(
+            unit_id=unit.id,
+            models_remaining=state_models_remaining,
+            spell_tokens=state_spell_tokens_val,
+            deployment_status=initial_deployment,
+        )
+        session.add(state)
+        await session.flush()  # Get state ID
+        
+        # Cache all values IMMEDIATELY after flush, before any other operations
+        # This is the only safe time to access these attributes
+        # player_id already cached above
+        unit_id = unit.id
+        game_id = game.id
+        game_round = game.current_round
+        state_id = state.id  # Get ID right after flush, before commit
+        
+        # Update player stats
+        player.starting_unit_count = (player.starting_unit_count or 0) + 1
+        player.starting_points = (player.starting_points or 0) + data.cost
+        
+        # Log the unit creation
+        # Cache all values before commit to avoid greenlet issues
+        display_name = unit.display_name
+        unit_name = unit.name  # Cache unit.name as well
+        player_name = player.name  # Cache player.name as well
+        
+        # Create event directly to avoid accessing game/player objects in log_event
+        event = GameEvent.create(
+            game_id=game_id,
+            event_type=EventType.CUSTOM,
+            description=f"{player_name} added unit: {display_name} ({data.cost}pts)",
+            player_id=player_id,
+            round_number=game_round,
+            target_unit_id=unit_id,
+            details={
+                "unit_name": unit_name,
+                "cost": data.cost,
+                "quality": data.quality,
+                "defense": data.defense,
+            },
+        )
+        session.add(event)
+        
+        await session.commit()
+        
+        # Use known initial values for state response (we just created it, so we know the values)
+        # We cached state_id right after flush, so it's safe to use
+        unit_state_response = UnitStateResponse(
+            id=state_id,
+            wounds_taken=0,  # Initial value
+            models_remaining=state_models_remaining,
+            activated_this_round=False,  # Initial value
+            is_shaken=False,  # Initial value
+            is_fatigued=False,  # Initial value
+            deployment_status=initial_deployment,
+            transport_id=None,  # Initial value
+            spell_tokens=state_spell_tokens_val,
+            limited_weapons_used=None,  # Initial value
+            custom_notes=None,  # Initial value
+        )
+        
+        unit_response = UnitResponse(
+            id=unit_id,
+            player_id=player_id,
+            name=data.name,
+            custom_name=data.custom_name,
+            quality=data.quality,
+            defense=data.defense,
+            size=data.size,
+            tough=props["tough"],
+            cost=data.cost,
+            loadout=data.loadout,
+            rules=data.rules,
+            is_hero=props["is_hero"],
+            is_caster=props["is_caster"],
+            caster_level=props["caster_level"],
+            is_transport=props["is_transport"],
+            transport_capacity=props["transport_capacity"],
+            has_ambush=props["has_ambush"],
+            has_scout=props["has_scout"],
+            attached_to_unit_id=data.attached_to_unit_id,
+            state=unit_state_response,
+        )
+        
+        # Broadcast state update
+        await broadcast_to_game(code, {
+            "type": "state_update",
+            "data": {
+                "reason": "unit_created",
+                "player_id": str(player_id),
+                "unit_id": str(unit_id),
+            }
+        })
+        
+        return unit_response
+    
+    @delete("/{code:str}/players/{player_id:uuid}/units", status_code=200)
+    async def clear_all_units(
+        self,
+        code: str,
+        player_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> ClearUnitsResponse:
+        """Clear all units for a player (only allowed in lobby)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        
+        # Only allow in lobby status
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Units can only be cleared in the lobby")
+        
+        # Find the player
+        player = None
+        for p in game.players:
+            if p.id == player_id:
+                player = p
+                break
+        
+        if not player:
+            raise NotFoundException(f"Player {player_id} not found in game")
+        
+        # Query all units for this player
+        units_stmt = select(Unit).where(Unit.player_id == player_id)
+        units_result = await session.execute(units_stmt)
+        units = units_result.scalars().all()
+        
+        units_count = len(units)
+        total_points = sum(unit.cost for unit in units)
+        
+        # Cache values before deletion to avoid accessing expired objects
+        player_name = player.name
+        player_id_cached = player_id  # Already a parameter, but explicit
+        game_id = game.id
+        game_code = game.code
+        game_round = game.current_round
+        
+        # Delete all units (cascade will handle UnitState deletion)
+        for unit in units:
+            await session.delete(unit)
+        
+        # Reset player stats
+        player.starting_unit_count = 0
+        player.starting_points = 0
+        player.army_name = None
+        player.army_forge_list_id = None
+        
+        # Log the clear action
+        event = GameEvent.create(
+            game_id=game_id,
+            event_type=EventType.CUSTOM,
+            description=f"{player_name} cleared all units ({units_count} units, {total_points}pts)",
+            player_id=player_id_cached,
+            round_number=game_round,
+            details={
+                "units_cleared": units_count,
+                "points_cleared": total_points,
+            },
+        )
+        session.add(event)
+        
+        await session.commit()
+        
+        # Broadcast state update
+        await broadcast_to_game(game_code, {
+            "type": "state_update",
+            "data": {
+                "reason": "units_cleared",
+                "player_id": str(player_id_cached),
+            }
+        })
+        
+        return ClearUnitsResponse(
+            success=True,
+            units_cleared=units_count,
+            message=f"Cleared {units_count} units ({total_points}pts)"
+        )
     
     @patch("/{code:str}/units/{unit_id:uuid}/detach")
     async def detach_unit(

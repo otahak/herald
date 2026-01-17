@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="herald-debug" content="{{ 'true' if APP_DEBUG() else 'false' }}">
     <title>{% block title %}Herald{% endblock %}</title>
     <link rel="icon" href="/static/favicon.ico">
     <!-- Vue 3 (Production Build) -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- Debug utility (must load before other scripts) -->
+    <script src="/static/js/debug.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- DaisyUI -->

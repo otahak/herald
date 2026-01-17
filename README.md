@@ -13,7 +13,9 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - **Unit Detachment**: Manual detachment of heroes from parent units; automatic detachment when parent is destroyed
 - **Shaken/Unshaken Logging**: All shaken state changes are logged with proper event tracking
 - Action log: Automatic logging of all game state changes with human-readable descriptions
-- Army Forge import (share link) per player with log entry
+- **Army Forge Import**: Import units from Army Forge share links (accumulates with existing units)
+- **Manual Unit Entry**: Add units one at a time via form modal
+- **Clear All Units**: Explicit button with confirmation to clear all units (only in lobby)
 - Responsive/mobile-friendly UI
 
 ## Architecture
@@ -101,7 +103,9 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - `POST /api/games` – create game (game_system optional, defaults to GFF)
 - `POST /api/games/{code}/join` – join game
 - `POST /api/games/{code}/start` – start game
-- `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`)
+- `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`) - **adds units** (does not clear existing)
+- `POST /api/games/{code}/units/manual` – create unit manually (`CreateUnitRequest`)
+- `DELETE /api/games/{code}/players/{player_id}/units` – clear all units for a player (lobby only)
 - `GET /api/games/{code}` – fetch game state (players, units, events)
 - `GET /api/games/{code}/events` – fetch game event log
 - `PATCH /api/games/{code}/players/{player_id}/victory-points` – update VP (`delta: int`)
@@ -113,6 +117,11 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 ## Frontend State / Identity
 - `gameStore.js` persists identity in localStorage; honors `?playerId=` in board URL.
 - Board modal rules: empty slot → name entry; disconnected player → selection; both active → blocked.
+
+## Army Management
+- **Army Forge Import**: Imports units from Army Forge share links. Units are **added** to existing units (does not clear existing units). Multiple imports accumulate.
+- **Manual Unit Entry**: Add units one at a time via the "Add Unit Manually" button in the lobby. Units accumulate with imported units.
+- **Clear All Units**: Use the "Clear All Units" button (only visible when player has units) to remove all units. Requires confirmation modal. Only available in lobby status. Resets player stats (unit count, points, army name).
 
 ## Troubleshooting
 - WebSockets: if stale, hard-refresh; check console for “WebSocket connected.”
