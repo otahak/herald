@@ -149,6 +149,32 @@ sudo apt-get install certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com
 ```
 
+## Database Migrations
+
+Migrations are run automatically during deployment via GitHub Actions.
+
+### Manual Migration Execution
+
+To run migrations manually:
+
+```bash
+cd /opt/herald
+sudo -u herald /opt/herald/.venv/bin/python deploy/run_migrations.py
+```
+
+By default, migrations run without resetting the database (data persists).
+
+### Database Reset (Troubleshooting)
+
+If you encounter permission issues or need to start fresh, you can reset the database:
+
+```bash
+cd /opt/herald
+sudo -u herald /opt/herald/.venv/bin/python deploy/run_migrations.py --reset-db
+```
+
+**WARNING**: The `--reset-db` flag will **drop and recreate** the database, destroying all data. Use only when troubleshooting or when data loss is acceptable.
+
 ## Maintenance
 
 ### View Logs
@@ -174,6 +200,9 @@ sudo -u herald git pull  # if using git
 
 # Reinstall dependencies if needed
 sudo -u herald uv sync --frozen --no-dev
+
+# Run migrations (if any new migrations exist)
+sudo -u herald /opt/herald/.venv/bin/python deploy/run_migrations.py
 
 # Restart
 sudo systemctl restart herald
