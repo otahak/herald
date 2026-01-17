@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Migration: Add VP_CHANGED (uppercase) to EventType enum.
+Migration: Normalize VP_CHANGED to uppercase in EventType enum.
 
-This matches the existing database enum pattern (uppercase names).
+This consolidates previous lowercase/uppercase migrations and ensures the
+enum label is VP_CHANGED.
 """
 import asyncio
 import os
@@ -93,39 +94,59 @@ async def migrate():
                 print("  Note: The enum type should be created by the base schema (init_db.py)")
                 return
             
-            # Check if VP_CHANGED already exists in the enum
-            check_query = text("""
+            # Check for existing labels (upper and lower)
+            upper_check = text("""
                 SELECT enumlabel 
                 FROM pg_enum 
                 WHERE enumlabel = 'VP_CHANGED' 
                 AND oid = (SELECT oid FROM pg_type WHERE typname = 'eventtype')
             """)
-            result = await conn.execute(check_query)
-            exists = result.fetchone() is not None
+            lower_check = text("""
+                SELECT enumlabel 
+                FROM pg_enum 
+                WHERE enumlabel = 'vp_changed' 
+                AND oid = (SELECT oid FROM pg_type WHERE typname = 'eventtype')
+            """)
+            upper_exists = (await conn.execute(upper_check)).fetchone() is not None
+            lower_exists = (await conn.execute(lower_check)).fetchone() is not None
             
-            if exists:
+            if upper_exists:
                 print("Enum value 'VP_CHANGED' already exists. Skipping migration.")
-            else:
-                # Add the new enum value
-                # Note: PostgreSQL does not support IF NOT EXISTS for ALTER TYPE ADD VALUE
-                # We check first above to ensure idempotency
-                # ALTER TYPE ADD VALUE must be run outside a transaction block
+                return
+            
+            if lower_exists:
+                print("Enum value 'vp_changed' exists. Renaming to 'VP_CHANGED'...")
                 try:
-                    alter_query = text("""
-                        ALTER TYPE eventtype ADD VALUE 'VP_CHANGED'
+                    rename_query = text("""
+                        ALTER TYPE eventtype RENAME VALUE 'vp_changed' TO 'VP_CHANGED'
                     """)
-                    await conn.execute(alter_query)
-                    await conn.commit()  # Explicit commit for ALTER TYPE
-                    print("Successfully added 'VP_CHANGED' to eventtype enum!")
+                    await conn.execute(rename_query)
+                    await conn.commit()
+                    print("Successfully renamed 'vp_changed' to 'VP_CHANGED'!")
                 except Exception as e:
-                    # Handle case where value was added between check and ALTER
-                    # (race condition or case sensitivity issue)
                     error_str = str(e).lower()
                     if 'duplicate' in error_str or 'already exists' in error_str:
-                        print("Enum value 'VP_CHANGED' already exists (detected during add). Skipping.")
-                        await conn.commit()  # Commit any partial state
+                        print("Enum value 'VP_CHANGED' already exists (detected during rename). Skipping.")
+                        await conn.commit()
                     else:
                         raise
+                return
+            
+            # Add the new enum value if neither exists
+            try:
+                add_query = text("""
+                    ALTER TYPE eventtype ADD VALUE 'VP_CHANGED'
+                """)
+                await conn.execute(add_query)
+                await conn.commit()  # Explicit commit for ALTER TYPE
+                print("Successfully added 'VP_CHANGED' to eventtype enum!")
+            except Exception as e:
+                error_str = str(e).lower()
+                if 'duplicate' in error_str or 'already exists' in error_str:
+                    print("Enum value 'VP_CHANGED' already exists (detected during add). Skipping.")
+                    await conn.commit()
+                else:
+                    raise
     except Exception as e:
         print(f"ERROR: Failed to connect to database: {e}")
         import traceback
