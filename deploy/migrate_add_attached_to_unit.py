@@ -16,10 +16,13 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
 # Import models to use their metadata for table creation
+# Import all models to ensure relationships are registered
 from app.models import Base
 from app.models.game import Game
 from app.models.player import Player
-from app.models.unit import Unit
+from app.models.unit import Unit, UnitState
+from app.models.objective import Objective
+from app.models.event import GameEvent
 
 # Load DATABASE_URL from environment or .env file
 PROJECT_ROOT = Path(__file__).parent.parent
