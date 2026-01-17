@@ -78,12 +78,20 @@ async def main():
     try:
         async with async_session() as session:
             # Grant permissions on feedback table
+            # Note: This requires superuser privileges, so it should be run as postgres user
             grant_stmt = text(f"""
                 GRANT ALL PRIVILEGES ON TABLE feedback TO {db_user};
             """)
-            await session.execute(grant_stmt)
-            await session.commit()
-            print(f"✓ Granted permissions on feedback table to user: {db_user}")
+            try:
+                await session.execute(grant_stmt)
+                await session.commit()
+                print(f"✓ Granted permissions on feedback table to user: {db_user}")
+            except Exception as e:
+                if "permission denied" in str(e).lower() or "must be owner" in str(e).lower():
+                    print(f"⚠ Permission denied. This script needs to be run as postgres superuser.")
+                    print(f"   Run: sudo -u postgres psql -d herald -c \"GRANT ALL PRIVILEGES ON TABLE feedback TO {db_user};\"")
+                    raise
+                raise
             
             # Also grant on all tables in public schema (for future tables)
             grant_all_stmt = text(f"""
@@ -92,9 +100,16 @@ async def main():
                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {db_user};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {db_user};
             """)
-            await session.execute(grant_all_stmt)
-            await session.commit()
-            print(f"✓ Granted default permissions on all tables/sequences to user: {db_user}")
+            try:
+                await session.execute(grant_all_stmt)
+                await session.commit()
+                print(f"✓ Granted default permissions on all tables/sequences to user: {db_user}")
+            except Exception as e:
+                if "permission denied" in str(e).lower() or "must be owner" in str(e).lower():
+                    print(f"⚠ Could not grant default permissions (requires superuser).")
+                    print(f"   This is okay - the feedback table permissions were granted.")
+                else:
+                    raise
             
     except Exception as e:
         print(f"ERROR: Failed to grant permissions: {e}")
