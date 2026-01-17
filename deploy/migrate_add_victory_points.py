@@ -101,19 +101,11 @@ async def migrate():
                     print("  Creating 'games' table (dependency)...")
                     await conn.run_sync(Game.__table__.create, checkfirst=True)
                 
-                # Create players table without victory_points (we'll add it below)
-                # Temporarily remove the column from the table definition
-                original_columns = Player.__table__.columns.copy()
-                if 'victory_points' in Player.__table__.columns:
-                    Player.__table__.columns.remove(Player.__table__.columns['victory_points'])
-                
+                # Create players table with all columns (including victory_points from model)
                 await conn.run_sync(Player.__table__.create, checkfirst=True)
-                
-                # Restore the column definition
-                if 'victory_points' not in Player.__table__.columns:
-                    Player.__table__.append_column(original_columns['victory_points'])
-                
-                print("✓ Created 'players' table with base schema")
+                print("✓ Created 'players' table with all columns (including victory_points)")
+                # Column already exists, so skip the ALTER below
+                return
             
             # Check if column already exists
             check_query = text("""

@@ -118,19 +118,11 @@ async def migrate():
                     print("  Creating 'players' table (dependency)...")
                     await conn.run_sync(Player.__table__.create, checkfirst=True)
                 
-                # Create units table without attached_to_unit_id (we'll add it below)
-                # Temporarily remove the column from the table definition
-                original_columns = Unit.__table__.columns.copy()
-                if 'attached_to_unit_id' in Unit.__table__.columns:
-                    Unit.__table__.columns.remove(Unit.__table__.columns['attached_to_unit_id'])
-                
+                # Create units table with all columns (including attached_to_unit_id from model)
                 await conn.run_sync(Unit.__table__.create, checkfirst=True)
-                
-                # Restore the column definition
-                if 'attached_to_unit_id' not in Unit.__table__.columns:
-                    Unit.__table__.append_column(original_columns['attached_to_unit_id'])
-                
-                print("✓ Created 'units' table with base schema")
+                print("✓ Created 'units' table with all columns (including attached_to_unit_id)")
+                # Column already exists, so skip the ALTER below
+                return
             
             # Check if column already exists
             check_query = text("""
