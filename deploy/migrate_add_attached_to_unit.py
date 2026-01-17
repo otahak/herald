@@ -87,6 +87,21 @@ async def migrate():
     print("Attempting to connect to database...")
     try:
         async with engine.begin() as conn:
+            # First check if table exists
+            table_check = text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'units'
+                );
+            """)
+            table_result = await conn.execute(table_check)
+            table_exists = table_result.scalar()
+            
+            if not table_exists:
+                print("Table 'units' does not exist yet. Skipping migration (base schema will create it).")
+                return
+            
             # Check if column already exists
             check_query = text("""
                 SELECT column_name 
