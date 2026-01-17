@@ -65,25 +65,29 @@ class AdminController(Controller):
         unread_only: bool = False,
     ) -> List[FeedbackListItem]:
         """Get all feedback submissions."""
-        stmt = select(Feedback).order_by(desc(Feedback.created_at))
-        
-        if unread_only:
-            stmt = stmt.where(Feedback.read == False)
-        
-        result = await session.execute(stmt)
-        feedback_list = result.scalars().all()
-        
-        return [
-            FeedbackListItem(
-                id=str(f.id),
-                name=f.name,
-                email=f.email,
-                message=f.message,
-                read=f.read,
-                created_at=f.created_at,
-            )
-            for f in feedback_list
-        ]
+        try:
+            stmt = select(Feedback).order_by(desc(Feedback.created_at))
+            
+            if unread_only:
+                stmt = stmt.where(Feedback.read == False)
+            
+            result = await session.execute(stmt)
+            feedback_list = result.scalars().all()
+            
+            return [
+                FeedbackListItem(
+                    id=str(f.id),
+                    name=f.name,
+                    email=f.email,
+                    message=f.message,
+                    read=f.read,
+                    created_at=f.created_at,
+                )
+                for f in feedback_list
+            ]
+        except Exception as e:
+            logger.exception(f"Error fetching feedback: {e}")
+            raise
     
     @patch("/feedback/{feedback_id:uuid}/read")
     async def mark_feedback_read(
@@ -111,66 +115,70 @@ class AdminController(Controller):
         session: AsyncSession,
     ) -> StatsResponse:
         """Get admin statistics."""
-        # Total games
-        total_games_result = await session.execute(
-            select(func.count(Game.id))
-        )
-        total_games = total_games_result.scalar() or 0
-        
-        # Active games (status = IN_PROGRESS)
-        active_games_result = await session.execute(
-            select(func.count(Game.id)).where(Game.status == GameStatus.IN_PROGRESS)
-        )
-        active_games = active_games_result.scalar() or 0
-        
-        # Total players
-        total_players_result = await session.execute(
-            select(func.count(Player.id))
-        )
-        total_players = total_players_result.scalar() or 0
-        
-        # Total units
-        total_units_result = await session.execute(
-            select(func.count(Unit.id))
-        )
-        total_units = total_units_result.scalar() or 0
-        
-        # Total feedback
-        total_feedback_result = await session.execute(
-            select(func.count(Feedback.id))
-        )
-        total_feedback = total_feedback_result.scalar() or 0
-        
-        # Unread feedback
-        unread_feedback_result = await session.execute(
-            select(func.count(Feedback.id)).where(Feedback.read == False)
-        )
-        unread_feedback = unread_feedback_result.scalar() or 0
-        
-        # Games created in last 24 hours
-        day_ago = datetime.utcnow() - timedelta(days=1)
-        games_24h_result = await session.execute(
-            select(func.count(Game.id)).where(Game.created_at >= day_ago)
-        )
-        games_last_24h = games_24h_result.scalar() or 0
-        
-        # Games created in last 7 days
-        week_ago = datetime.utcnow() - timedelta(days=7)
-        games_7d_result = await session.execute(
-            select(func.count(Game.id)).where(Game.created_at >= week_ago)
-        )
-        games_last_7d = games_7d_result.scalar() or 0
-        
-        return StatsResponse(
-            total_games=total_games,
-            active_games=active_games,
-            total_players=total_players,
-            total_units=total_units,
-            total_feedback=total_feedback,
-            unread_feedback=unread_feedback,
-            games_last_24h=games_last_24h,
-            games_last_7d=games_last_7d,
-        )
+        try:
+            # Total games
+            total_games_result = await session.execute(
+                select(func.count(Game.id))
+            )
+            total_games = total_games_result.scalar() or 0
+            
+            # Active games (status = IN_PROGRESS)
+            active_games_result = await session.execute(
+                select(func.count(Game.id)).where(Game.status == GameStatus.IN_PROGRESS)
+            )
+            active_games = active_games_result.scalar() or 0
+            
+            # Total players
+            total_players_result = await session.execute(
+                select(func.count(Player.id))
+            )
+            total_players = total_players_result.scalar() or 0
+            
+            # Total units
+            total_units_result = await session.execute(
+                select(func.count(Unit.id))
+            )
+            total_units = total_units_result.scalar() or 0
+            
+            # Total feedback
+            total_feedback_result = await session.execute(
+                select(func.count(Feedback.id))
+            )
+            total_feedback = total_feedback_result.scalar() or 0
+            
+            # Unread feedback
+            unread_feedback_result = await session.execute(
+                select(func.count(Feedback.id)).where(Feedback.read == False)
+            )
+            unread_feedback = unread_feedback_result.scalar() or 0
+            
+            # Games created in last 24 hours
+            day_ago = datetime.utcnow() - timedelta(days=1)
+            games_24h_result = await session.execute(
+                select(func.count(Game.id)).where(Game.created_at >= day_ago)
+            )
+            games_last_24h = games_24h_result.scalar() or 0
+            
+            # Games created in last 7 days
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            games_7d_result = await session.execute(
+                select(func.count(Game.id)).where(Game.created_at >= week_ago)
+            )
+            games_last_7d = games_7d_result.scalar() or 0
+            
+            return StatsResponse(
+                total_games=total_games,
+                active_games=active_games,
+                total_players=total_players,
+                total_units=total_units,
+                total_feedback=total_feedback,
+                unread_feedback=unread_feedback,
+                games_last_24h=games_last_24h,
+                games_last_7d=games_last_7d,
+            )
+        except Exception as e:
+            logger.exception(f"Error fetching stats: {e}")
+            raise
     
     @get("/events/recent")
     async def get_recent_events(
