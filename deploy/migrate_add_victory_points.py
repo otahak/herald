@@ -89,8 +89,27 @@ async def migrate():
             table_exists = table_result.scalar()
             
             if not table_exists:
-                print("Table 'players' does not exist yet. Skipping migration (base schema will create it).")
-                return
+                print("Table 'players' does not exist. Creating it with base schema...")
+                # Ensure games table exists first (dependency)
+                games_check = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'games');")
+                games_exists = (await conn.execute(games_check)).scalar()
+                if not games_exists:
+                    print("  Creating 'games' table (dependency)...")
+                    await conn.run_sync(Game.__table__.create, checkfirst=True)
+                
+                # Create players table without victory_points (we'll add it below)
+                # Temporarily remove the column from the table definition
+                original_columns = Player.__table__.columns.copy()
+                if 'victory_points' in Player.__table__.columns:
+                    Player.__table__.columns.remove(Player.__table__.columns['victory_points'])
+                
+                await conn.run_sync(Player.__table__.create, checkfirst=True)
+                
+                # Restore the column definition
+                if 'victory_points' not in Player.__table__.columns:
+                    Player.__table__.append_column(original_columns['victory_points'])
+                
+                print("✓ Created 'players' table with base schema")
             
             # Check if column already exists
             check_query = text("""

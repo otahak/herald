@@ -99,8 +99,33 @@ async def migrate():
             table_exists = table_result.scalar()
             
             if not table_exists:
-                print("Table 'units' does not exist yet. Skipping migration (base schema will create it).")
-                return
+                print("Table 'units' does not exist. Creating it with base schema...")
+                # Ensure dependencies exist first
+                games_check = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'games');")
+                games_exists = (await conn.execute(games_check)).scalar()
+                if not games_exists:
+                    print("  Creating 'games' table (dependency)...")
+                    await conn.run_sync(Game.__table__.create, checkfirst=True)
+                
+                players_check = text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'players');")
+                players_exists = (await conn.execute(players_check)).scalar()
+                if not players_exists:
+                    print("  Creating 'players' table (dependency)...")
+                    await conn.run_sync(Player.__table__.create, checkfirst=True)
+                
+                # Create units table without attached_to_unit_id (we'll add it below)
+                # Temporarily remove the column from the table definition
+                original_columns = Unit.__table__.columns.copy()
+                if 'attached_to_unit_id' in Unit.__table__.columns:
+                    Unit.__table__.columns.remove(Unit.__table__.columns['attached_to_unit_id'])
+                
+                await conn.run_sync(Unit.__table__.create, checkfirst=True)
+                
+                # Restore the column definition
+                if 'attached_to_unit_id' not in Unit.__table__.columns:
+                    Unit.__table__.append_column(original_columns['attached_to_unit_id'])
+                
+                print("✓ Created 'units' table with base schema")
             
             # Check if column already exists
             check_query = text("""
