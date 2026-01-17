@@ -4,12 +4,18 @@ Automatic migration runner.
 
 Discovers and runs all migration scripts in the deploy/ directory.
 Migrations are run in alphabetical order and are idempotent (safe to run multiple times).
+
+WARNING: This runner resets the database on every run.
 """
 import asyncio
 import os
 import sys
 import subprocess
+import re
+from urllib.parse import urlparse, urlunparse
 from pathlib import Path
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
 
 # Get the deploy directory
 DEPLOY_DIR = Path(__file__).parent
@@ -85,6 +91,64 @@ def find_migration_scripts():
             migrations.append(file)
     return migrations
 
+def _validate_identifier(value: str, label: str) -> str:
+    if not value or not re.match(r"^[A-Za-z0-9_]+$", value):
+        raise ValueError(f"Invalid {label}: {value!r}")
+    return value
+
+def _parse_database_url(database_url: str) -> tuple[str, str, str]:
+    parsed = urlparse(database_url)
+    db_name = parsed.path.lstrip("/")
+    if not db_name:
+        raise ValueError("DATABASE_URL is missing a database name")
+    user = parsed.username or ""
+    if not user:
+        raise ValueError("DATABASE_URL is missing a username")
+    return db_name, user, urlunparse(parsed._replace(path="/postgres"))
+
+async def reset_database(database_url: str) -> None:
+    """Drop and recreate the database on every run."""
+    db_name, db_user, admin_url = _parse_database_url(database_url)
+    _validate_identifier(db_name, "database name")
+    _validate_identifier(db_user, "database user")
+
+    print(f"Resetting database '{db_name}' (owner: {db_user})...")
+    engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) "
+                    "FROM pg_stat_activity "
+                    "WHERE datname = :db_name AND pid <> pg_backend_pid();"
+                ),
+                {"db_name": db_name},
+            )
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}"'))
+            await conn.execute(text(f'CREATE DATABASE "{db_name}" OWNER "{db_user}"'))
+        print("✓ Database reset complete")
+    finally:
+        await engine.dispose()
+
+def _build_script_command(script_path: Path, env: dict) -> tuple[list[str], dict]:
+    venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        return [str(venv_python), str(script_path)], env
+
+    uv_cmd = None
+    for path in ["/usr/local/bin/uv", "/root/.cargo/bin/uv", "/home/herald/.cargo/bin/uv"]:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            uv_cmd = path
+            break
+
+    if uv_cmd:
+        env_file = PROJECT_ROOT / ".env"
+        if env_file.exists():
+            return [uv_cmd, "run", "--env-file", str(env_file), "python", str(script_path)], env
+        return [uv_cmd, "run", "python", str(script_path)], env
+
+    return [sys.executable, str(script_path)], env
+
 async def run_migration(script_path: Path):
     """Run a single migration script."""
     print(f"\n{'='*60}")
@@ -108,35 +172,7 @@ async def run_migration(script_path: Path):
         print("WARNING: DATABASE_URL not found in environment!")
         print("This migration may fail. Check that .env file exists and contains DATABASE_URL.")
     
-    # Prefer using venv python if it exists (most reliable)
-    venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        cmd = [str(venv_python), str(script_path)]
-        # For venv python, pass the full env dict
-        subprocess_env = env
-    else:
-        # Fallback: try uv run, then system python
-        uv_cmd = None
-        for path in ["/usr/local/bin/uv", "/root/.cargo/bin/uv", "/home/herald/.cargo/bin/uv"]:
-            if os.path.exists(path) and os.access(path, os.X_OK):
-                uv_cmd = path
-                break
-        
-        if uv_cmd:
-            # When using uv run, explicitly pass --env-file to load .env
-            # uv run will load the .env file, but we also pass env to ensure PYTHONPATH is set
-            env_file = PROJECT_ROOT / ".env"
-            if env_file.exists():
-                cmd = [uv_cmd, "run", "--env-file", str(env_file), "python", str(script_path)]
-            else:
-                # Fallback: try without --env-file (should still inherit from env dict)
-                cmd = [uv_cmd, "run", "python", str(script_path)]
-            # uv run handles env loading, but we still pass env for PYTHONPATH and other vars
-            subprocess_env = env
-        else:
-            # Last resort: system python
-            cmd = [sys.executable, str(script_path)]
-            subprocess_env = env
+    cmd, subprocess_env = _build_script_command(script_path, env)
     
     # Run the migration script
     print(f"Running command: {' '.join(cmd)}")
@@ -221,6 +257,33 @@ async def main():
     for mig in migrations:
         print(f"  - {mig.name}")
     
+    print("\nResetting database (drop/recreate) ...")
+    env_vars = load_env_file()
+    env = {**os.environ, **env_vars, "PYTHONPATH": str(PROJECT_ROOT)}
+    database_url = env.get("DATABASE_URL")
+    if not database_url:
+        print("ERROR: DATABASE_URL not found. Cannot reset database.")
+        return 1
+
+    await reset_database(database_url)
+
+    print("\nInitializing base schema...")
+    init_script = DEPLOY_DIR / "init_db.py"
+    init_cmd, init_env = _build_script_command(init_script, env)
+    init_result = subprocess.run(
+        init_cmd,
+        cwd=str(PROJECT_ROOT),
+        env=init_env,
+        capture_output=True,
+        text=True,
+    )
+    if init_result.returncode != 0:
+        print("❌ init_db.py failed:")
+        print(init_result.stdout)
+        print(init_result.stderr, file=sys.stderr)
+        return 1
+    print("✓ Base schema initialized")
+
     print("\nStarting migrations...")
     
     failed = []
