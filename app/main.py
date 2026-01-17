@@ -151,15 +151,25 @@ def log_exceptions(request: Request, exc: Exception) -> Response:
 
 # --- Auth exception handler
 def handle_auth_exception(request: Request, exc: NotAuthorizedException) -> Response:
-    """Handle authentication failures by redirecting to login."""
+    """Handle authentication failures by redirecting to login for pages, JSON for API."""
     from litestar.response import Redirect
     from app.auth.oauth import get_base_path
-    # Only redirect for admin routes (handle both /admin and /herald/admin)
     path = request.url.path
-    if "/admin" in path or path.endswith("/admin") or path.endswith("/api/admin"):
+    
+    # API routes should return JSON, not redirect
+    if "/api/" in path:
+        return Response(
+            content={"detail": "Not authorized", "error": str(exc)},
+            status_code=HTTP_401_UNAUTHORIZED,
+            media_type="application/json"
+        )
+    
+    # For page routes, redirect to login
+    if "/admin" in path or path.endswith("/admin"):
         # Extract base path if app is served under a subpath (e.g., /herald)
         base_path = get_base_path(request)
         return Redirect(f"{base_path}/admin/login-page")
+    
     return Response(
         content={"detail": "Not authorized"},
         status_code=HTTP_401_UNAUTHORIZED,

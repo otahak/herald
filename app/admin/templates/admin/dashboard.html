@@ -22,7 +22,7 @@
             <p class="text-base-content/70">Manage feedback, view statistics, and monitor activity</p>
         </div>
         <div>
-            <a href="/admin/logout" class="btn btn-outline btn-sm">Logout</a>
+            <a href="{{ get_base_path() }}/admin/logout" class="btn btn-outline btn-sm">Logout</a>
         </div>
     </div>
     
@@ -211,6 +211,7 @@ const { createApp } = Vue;
 const app = createApp({
     data() {
         return {
+            basePath: '{{ get_base_path() }}',
             activeTab: 'stats',
             loading: false,
             loadingFeedback: false,
@@ -232,11 +233,12 @@ const app = createApp({
             this.loading = true;
             this.error = null;
             try {
-                const response = await fetch('/api/admin/stats');
+                const response = await fetch(`${this.basePath}/api/admin/stats`);
                 if (!response.ok) throw new Error('Failed to load statistics');
                 this.stats = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load statistics';
+                console.error('Error loading stats:', err);
             } finally {
                 this.loading = false;
             }
@@ -245,12 +247,13 @@ const app = createApp({
             this.loadingFeedback = true;
             this.error = null;
             try {
-                const url = `/api/admin/feedback${this.showUnreadOnly ? '?unread_only=true' : ''}`;
+                const url = `${this.basePath}/api/admin/feedback${this.showUnreadOnly ? '?unread_only=true' : ''}`;
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('Failed to load feedback');
                 this.feedbackList = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load feedback';
+                console.error('Error loading feedback:', err);
             } finally {
                 this.loadingFeedback = false;
             }
@@ -259,18 +262,19 @@ const app = createApp({
             this.loadingEvents = true;
             this.error = null;
             try {
-                const response = await fetch('/api/admin/events/recent?limit=50');
+                const response = await fetch(`${this.basePath}/api/admin/events/recent?limit=50`);
                 if (!response.ok) throw new Error('Failed to load events');
                 this.eventsList = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load events';
+                console.error('Error loading events:', err);
             } finally {
                 this.loadingEvents = false;
             }
         },
         async markAsRead(feedbackId) {
             try {
-                const response = await fetch(`/api/admin/feedback/${feedbackId}/read`, {
+                const response = await fetch(`${this.basePath}/api/admin/feedback/${feedbackId}/read`, {
                     method: 'PATCH'
                 });
                 if (!response.ok) throw new Error('Failed to mark as read');
@@ -283,6 +287,7 @@ const app = createApp({
                 }
             } catch (err) {
                 this.error = err.message || 'Failed to mark feedback as read';
+                console.error('Error marking as read:', err);
             }
         },
         toggleUnreadFilter() {
