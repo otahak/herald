@@ -5,9 +5,12 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from litestar import Controller, get, patch
+from litestar.exceptions import HTTPException
+from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from pydantic import BaseModel
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.models import Game, Player, Unit, GameEvent, Feedback
 from app.models.game import GameStatus
@@ -85,9 +88,25 @@ class AdminController(Controller):
                 )
                 for f in feedback_list
             ]
+        except (OperationalError, ProgrammingError) as e:
+            logger.exception(f"Database error fetching feedback: {e}")
+            # Check if it's a missing table error
+            error_msg = str(e).lower()
+            if "does not exist" in error_msg or "no such table" in error_msg:
+                raise HTTPException(
+                    detail="Feedback table does not exist. Please run database migrations.",
+                    status_code=HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            raise HTTPException(
+                detail=f"Database error: {str(e)}",
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR
+            )
         except Exception as e:
             logger.exception(f"Error fetching feedback: {e}")
-            raise
+            raise HTTPException(
+                detail=f"Error fetching feedback: {str(e)}",
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @patch("/feedback/{feedback_id:uuid}/read")
     async def mark_feedback_read(
@@ -176,9 +195,25 @@ class AdminController(Controller):
                 games_last_24h=games_last_24h,
                 games_last_7d=games_last_7d,
             )
+        except (OperationalError, ProgrammingError) as e:
+            logger.exception(f"Database error fetching stats: {e}")
+            # Check if it's a missing table error
+            error_msg = str(e).lower()
+            if "does not exist" in error_msg or "no such table" in error_msg:
+                raise HTTPException(
+                    detail="Database tables do not exist. Please run database migrations.",
+                    status_code=HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            raise HTTPException(
+                detail=f"Database error: {str(e)}",
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR
+            )
         except Exception as e:
             logger.exception(f"Error fetching stats: {e}")
-            raise
+            raise HTTPException(
+                detail=f"Error fetching stats: {str(e)}",
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @get("/events/recent")
     async def get_recent_events(
