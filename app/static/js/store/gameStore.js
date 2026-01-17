@@ -180,7 +180,7 @@ const GameStore = {
                 
                 // Use the player ID returned by the server
                 GameStore.state.currentPlayerId = game.your_player_id;
-                console.log('Joined as player:', game.your_player_id);
+                Debug.log('Joined as player:', game.your_player_id);
                 
                 return game;
             } catch (error) {
@@ -515,7 +515,7 @@ const GameStore = {
             };
             
             ws.onclose = () => {
-                console.log('WebSocket disconnected');
+                Debug.log('WebSocket disconnected');
                 GameStore.state.isConnected = false;
                 GameStore.state.ws = null;
                 
@@ -523,13 +523,13 @@ const GameStore = {
                 if (GameStore.state.reconnectAttempts < GameStore.state.maxReconnectAttempts) {
                     GameStore.state.reconnectAttempts++;
                     const delay = Math.min(1000 * Math.pow(2, GameStore.state.reconnectAttempts), 30000);
-                    console.log(`Reconnecting in ${delay}ms...`);
+                    Debug.log(`Reconnecting in ${delay}ms...`);
                     setTimeout(() => this.connectWebSocket(code), delay);
                 }
             };
             
             ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
+                Debug.error('WebSocket error:', error);
             };
             
             GameStore.state.ws = ws;
@@ -539,7 +539,7 @@ const GameStore = {
          * Handle incoming WebSocket messages
          */
         handleWebSocketMessage(message) {
-            console.log('WS message:', message.type, message);
+            Debug.log('WS message:', message.type, message);
             
             switch (message.type) {
                 case 'state':
@@ -596,7 +596,7 @@ const GameStore = {
                         this.fetchGame(GameStore.state.game.code);
                         this.fetchEvents();
                     }
-                    console.log('Player joined:', message.player.name);
+                    Debug.log('Player joined:', message.player.name);
                     break;
                 
                 case 'player_left':
@@ -665,7 +665,7 @@ const GameStore = {
                 savedAt: new Date().toISOString(),
             };
             localStorage.setItem('herald_player_identities', JSON.stringify(identities));
-            console.log(`Saved player identity: ${playerName} for game ${gameCode}`);
+            Debug.log(`Saved player identity: ${playerName} for game ${gameCode}`);
         },
         
         /**
@@ -699,7 +699,7 @@ const GameStore = {
                 
                 if (player) {
                     GameStore.state.currentPlayerId = saved.playerId;
-                    console.log(`Restored identity: ${player.name}`);
+                    Debug.log(`Restored identity: ${player.name}`);
                     return player;
                 } else {
                     // Player no longer in game, clear identity

@@ -11,9 +11,17 @@ ENV_FILE_PATHS = [
     Path(__file__).parent.parent.parent / ".env",
 ]
 
+# Check debug mode early for conditional logging
+DEBUG = getenv("APP_DEBUG", "false").lower() == "true"
+
+def _conditional_print(message: str) -> None:
+    """Print only if APP_DEBUG is enabled."""
+    if DEBUG:
+        print(message)
+
 def load_env_file_fallback():
     """Load .env file directly if environment variables aren't set."""
-    # Use basic print for logging since logger might not be configured yet
+    # Use conditional print for logging since logger might not be configured yet
     for env_file in ENV_FILE_PATHS:
         if env_file.exists() and env_file.is_file():
             try:
@@ -39,22 +47,22 @@ def load_env_file_fallback():
                                 os.environ[key] = value
                                 loaded_count += 1
                 if loaded_count > 0:
-                    print(f"[Herald] Loaded {loaded_count} environment variables from {env_file}")
+                    _conditional_print(f"[Herald] Loaded {loaded_count} environment variables from {env_file}")
                 return True
             except Exception as e:
-                print(f"[Herald] Warning: Could not load .env file from {env_file}: {e}")
+                _conditional_print(f"[Herald] Warning: Could not load .env file from {env_file}: {e}")
     return False
 
 # Load .env file if OAuth credentials aren't in environment
 # This MUST happen before importing routes/oauth modules
 if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
-    print("[Herald] OAuth credentials not in environment, loading from .env file...")
+    _conditional_print("[Herald] OAuth credentials not in environment, loading from .env file...")
     load_env_file_fallback()
     # Verify they're now loaded
     if getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"):
-        print("[Herald] ✓ OAuth credentials loaded from .env file")
+        _conditional_print("[Herald] ✓ OAuth credentials loaded from .env file")
     else:
-        print("[Herald] ⚠ WARNING: OAuth credentials still not found after loading .env file")
+        _conditional_print("[Herald] ⚠ WARNING: OAuth credentials still not found after loading .env file")
 
 from litestar import Litestar, Request
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemyInitPlugin, SQLAlchemyAsyncConfig
@@ -67,8 +75,7 @@ from litestar.exceptions import NotAuthorizedException, HTTPException
 
 from app.routes import ROUTES
 from app.models import Base  # Import models Base for table creation
-
-DEBUG = getenv("APP_DEBUG", "false").lower() == "true"
+from app.utils.logging import error_log, log_request_error
 # Default DATABASE_URL is for local dev only (Docker Compose)
 # Production should always set DATABASE_URL environment variable
 DATABASE_URL = getenv(
@@ -127,6 +134,9 @@ def register_template_globals(engine: JinjaTemplateEngine) -> None:
     
     # Register as a callable that templates can use
     engine.register_template_callable("get_base_path", base_path_helper)
+    
+    # Register DEBUG flag as a global so templates can access it
+    engine.register_template_callable("APP_DEBUG", lambda ctx: DEBUG)
 
 template_config = TemplateConfig(
     directory=template_dirs,
@@ -137,20 +147,28 @@ template_config = TemplateConfig(
 
 # --- Exception handler
 def log_exceptions(request: Request, exc: Exception) -> Response:
-    """Handle unhandled exceptions."""
+    """Handle unhandled exceptions with enhanced logging."""
     from litestar.exceptions import HTTPException
     
     # If it's already an HTTPException, preserve its details
     if isinstance(exc, HTTPException):
-        logger.warning(f"HTTPException: {exc.detail} (status: {exc.status_code})")
+        error_log(
+            f"HTTPException: {exc.detail}",
+            exc=None,
+            context={
+                "status_code": exc.status_code,
+                "path": str(request.url.path) if hasattr(request, "url") else "unknown",
+                "method": request.method if hasattr(request, "method") else "unknown",
+            }
+        )
         return Response(
             content={"detail": exc.detail, "status_code": exc.status_code},
             status_code=exc.status_code,
             media_type="application/json"
         )
     
-    # For other exceptions, log and return generic error
-    logger.exception("Unhandled exception occurred", exc_info=exc)
+    # For other exceptions, log with enhanced context
+    log_request_error(request, exc, message="Unhandled exception occurred")
     return Response(
         content={"detail": {"error": str(exc), "type": type(exc).__name__}},
         status_code=HTTP_500_INTERNAL_SERVER_ERROR,

@@ -15,6 +15,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from app.models import Game, Player, Unit, GameEvent, Feedback
 from app.models.game import GameStatus
 from app.auth.oauth import require_admin_guard
+from app.utils.logging import error_log, log_exception_with_context
 
 logger = logging.getLogger("Herald.admin")
 
@@ -198,7 +199,11 @@ class AdminController(Controller):
             )
         except (OperationalError, ProgrammingError) as e:
             error_msg = str(e)
-            logger.exception(f"Database error fetching stats: {error_msg}")
+            error_log(
+                "Database error fetching stats",
+                exc=e,
+                context={"endpoint": "get_stats"}
+            )
             # Check if it's a missing table error
             if "does not exist" in error_msg.lower() or "no such table" in error_msg.lower():
                 raise HTTPException(
@@ -211,7 +216,11 @@ class AdminController(Controller):
             )
         except Exception as e:
             error_msg = str(e)
-            logger.exception(f"Error fetching stats: {error_msg}")
+            error_log(
+                "Error fetching stats",
+                exc=e,
+                context={"endpoint": "get_stats"}
+            )
             raise HTTPException(
                 detail={"error": f"Error fetching stats: {error_msg}", "type": "unknown_error"},
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Any
 
-from litestar import Controller, get, post, patch, delete
+from litestar import Controller, get, post, patch, delete, Request
 from litestar.dto import DTOConfig
 from litestar.exceptions import NotFoundException, ValidationException
 from pydantic import BaseModel, Field
@@ -21,6 +21,7 @@ from app.models import (
     GameEvent, EventType,
 )
 from app.api.websocket import broadcast_to_game
+from app.utils.logging import error_log, log_exception_with_context
 
 logger = logging.getLogger("Herald.games")
 
@@ -315,7 +316,15 @@ class GamesController(Controller):
             logger.info(f"Game created successfully: {game.code} (host: {player.name})")
             return GameResponse.model_validate(game)
         except Exception as e:
-            logger.error(f"Failed to create game: {str(e)}")
+            error_log(
+                "Failed to create game",
+                exc=e,
+                context={
+                    "game_name": data.name,
+                    "game_system": str(data.game_system) if data.game_system else "GFF",
+                    "player_name": data.player_name,
+                }
+            )
             raise
     
     @get("/{code:str}")

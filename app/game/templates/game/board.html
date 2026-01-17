@@ -1325,7 +1325,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         const player = playersList.find(p => p.id === String(savedIdentity.playerId));
                         if (player) {
                             store.state.currentPlayerId = savedIdentity.playerId;
-                            console.log('Restored player identity:', player.name);
+                            Debug.log('Restored player identity:', player.name);
                             store.actions.connectWebSocket(GAME_CODE);
                             return;
                         } else {

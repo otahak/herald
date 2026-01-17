@@ -18,6 +18,7 @@ from app.models import (
     GameEvent, EventType,
 )
 from app.api.websocket import broadcast_to_game
+from app.utils.logging import error_log, log_exception_with_context
 
 logger = logging.getLogger("Herald.proxy")
 
@@ -219,8 +220,15 @@ class ProxyController(Controller):
                 logger.info(f"Successfully fetched list {list_id}: {len(data.get('units', []))} units")
                 return ArmyForgeListResponse(**data)
             except httpx.HTTPStatusError as e:
-                logger.error(f"Army Forge HTTP error for list {list_id}: {e.response.status_code}")
-                logger.debug(f"Response body: {e.response.text[:500] if e.response.text else 'empty'}")
+                error_log(
+                    "Army Forge HTTP error",
+                    exc=e,
+                    context={
+                        "list_id": list_id,
+                        "status_code": e.response.status_code,
+                        "response_preview": e.response.text[:200] if e.response.text else "empty",
+                    }
+                )
                 if e.response.status_code == 404:
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
@@ -229,11 +237,19 @@ class ProxyController(Controller):
                         f"Try re-sharing your list from Army Forge."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
-            except httpx.TimeoutException:
-                logger.error(f"Timeout fetching Army Forge list {list_id}")
+            except httpx.TimeoutException as e:
+                error_log(
+                    "Timeout fetching Army Forge list",
+                    exc=e,
+                    context={"list_id": list_id}
+                )
                 raise ValidationException("Army Forge request timed out. Please try again.")
             except httpx.RequestError as e:
-                logger.error(f"Request error fetching Army Forge list {list_id}: {str(e)}")
+                error_log(
+                    "Request error fetching Army Forge list",
+                    exc=e,
+                    context={"list_id": list_id}
+                )
                 raise ValidationException(f"Failed to connect to Army Forge: {str(e)}")
     
     @post("/import-army/{game_code:str}")
@@ -392,7 +408,15 @@ class ProxyController(Controller):
                 
                 total_points += unit.cost
             except Exception as e:
-                logger.error(f"Error creating unit '{unit_data.get('name', 'Unknown')}': {str(e)}")
+                error_log(
+                    "Error creating unit during Army Forge import",
+                    exc=e,
+                    context={
+                        "unit_name": unit_data.get('name', 'Unknown'),
+                        "game_code": game_code,
+                        "player_id": str(data.player_id) if hasattr(data, 'player_id') else None,
+                    }
+                )
                 raise ValidationException(f"Failed to import unit '{unit_data.get('name', 'Unknown')}': {str(e)}")
             units_created += 1
         
