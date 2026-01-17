@@ -4,12 +4,24 @@ on:
   push:
     branches:
       - main
+      - dev  # Allow deploying from dev branch for testing
   workflow_dispatch:  # Allow manual triggering from GitHub UI
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+          - main
+          - dev
 
 jobs:
   deploy:
     name: Deploy to Server
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout code
@@ -28,8 +40,85 @@ jobs:
           ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
       
       - name: Deploy to server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_AUTHORIZED_EMAIL: ${{ secrets.GOOGLE_AUTHORIZED_EMAIL }}
+          APP_DEBUG: ${{ secrets.APP_DEBUG || 'false' }}
         run: |
-          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
+          # Debug: Check if secrets are set (without exposing values)
+          echo "Checking secrets..."
+          echo "Secret names being checked: DATABASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_AUTHORIZED_EMAIL, APP_DEBUG"
+          
+          # Check if the secret reference itself is empty (before variable expansion)
+          if [ -z "${{ secrets.DATABASE_URL }}" ]; then
+            echo "ERROR: secrets.DATABASE_URL reference is empty!"
+            echo "This means the secret is not set in GitHub Actions secrets."
+            echo "Please verify:"
+            echo "  1. Go to: https://github.com/otahak/herald/settings/secrets/actions"
+            echo "  2. Ensure 'DATABASE_URL' secret exists (case-sensitive)"
+            echo "  3. Check that you're in 'Actions' secrets, not 'Codespaces' secrets"
+            exit 1
+          fi
+          
+          if [ -z "$DATABASE_URL" ]; then
+            echo "ERROR: DATABASE_URL environment variable is empty after expansion!"
+            echo "Secret reference exists but variable is empty - this shouldn't happen."
+            exit 1
+          else
+            echo "✓ DATABASE_URL is set (length: ${#DATABASE_URL})"
+          fi
+          
+          if [ -z "$GOOGLE_CLIENT_ID" ]; then
+            echo "WARNING: GOOGLE_CLIENT_ID secret is empty"
+          else
+            echo "✓ GOOGLE_CLIENT_ID is set"
+          fi
+          
+          if [ -z "$GOOGLE_CLIENT_SECRET" ]; then
+            echo "WARNING: GOOGLE_CLIENT_SECRET secret is empty"
+          else
+            echo "✓ GOOGLE_CLIENT_SECRET is set"
+          fi
+          
+          if [ -z "$GOOGLE_AUTHORIZED_EMAIL" ]; then
+            echo "WARNING: GOOGLE_AUTHORIZED_EMAIL secret is empty"
+          else
+            echo "✓ GOOGLE_AUTHORIZED_EMAIL is set"
+          fi
+          
+          # Create .env file content locally (no leading spaces for systemd compatibility)
+          {
+            echo "DATABASE_URL=$DATABASE_URL"
+            echo "GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID"
+            echo "GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET"
+            echo "GOOGLE_AUTHORIZED_EMAIL=$GOOGLE_AUTHORIZED_EMAIL"
+            echo "APP_DEBUG=$APP_DEBUG"
+          } > /tmp/herald.env
+          
+          # Verify .env file was created correctly (check non-empty values)
+          if ! grep -q "DATABASE_URL=.*[^[:space:]]" /tmp/herald.env; then
+            echo "ERROR: DATABASE_URL in .env file is empty!"
+            echo "Contents of .env file (first 200 chars):"
+            head -c 200 /tmp/herald.env || cat /tmp/herald.env
+            exit 1
+          fi
+          echo "✓ .env file created successfully"
+          
+          # Transfer .env file to server
+          scp /tmp/herald.env ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/herald.env
+          rm /tmp/herald.env
+          
+          # Determine branch to deploy
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DEPLOY_BRANCH="${{ github.event.inputs.branch }}"
+          else
+            DEPLOY_BRANCH="${GITHUB_REF#refs/heads/}"
+          fi
+          echo "Deploying branch: $DEPLOY_BRANCH"
+          
+          ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "DEPLOY_BRANCH='$DEPLOY_BRANCH' bash -s" << 'ENDSSH'
             set -euo pipefail
             
             echo "=== Starting Herald Deployment ==="
@@ -37,11 +126,72 @@ jobs:
             # Navigate to app directory
             cd /opt/herald
             
-            # Pull latest code from main branch
-            echo "Pulling latest code from main..."
+            # Update .env file with secrets from GitHub
+            echo "Updating .env file with environment variables..."
+            
+            # CRITICAL: Remove any leading/trailing spaces from the .env file
+            # systemd's EnvironmentFile is very strict and will ignore lines with leading spaces
+            sed 's/^[[:space:]]*//;s/[[:space:]]*$//' /tmp/herald.env | grep -v '^$' > /tmp/herald.env.clean
+            
+            # Verify the cleaned file
+            if grep -q "^[[:space:]]" /tmp/herald.env.clean; then
+              echo "ERROR: Cleaned .env file still has leading spaces - this should not happen!"
+              exit 1
+            fi
+            
+            # Move cleaned file to final location
+            mv /tmp/herald.env.clean /opt/herald/.env
+            chown herald:herald /opt/herald/.env
+            chmod 600 /opt/herald/.env
+            echo "✓ .env file updated and cleaned (removed leading/trailing spaces)"
+            
+            # Verify .env file format (no leading spaces, proper KEY=VALUE format)
+            echo "Verifying .env file format..."
+            if grep -q "^[[:space:]]" /opt/herald/.env; then
+              echo "ERROR: .env file contains lines with leading spaces - this will break systemd EnvironmentFile!"
+              echo "First 5 lines of .env file:"
+              head -5 /opt/herald/.env | cat -A
+              exit 1
+            fi
+            if ! grep -q "^GOOGLE_CLIENT_ID=" /opt/herald/.env; then
+              echo "ERROR: GOOGLE_CLIENT_ID not found in .env file!"
+              exit 1
+            fi
+            if ! grep -q "^GOOGLE_CLIENT_SECRET=" /opt/herald/.env; then
+              echo "ERROR: GOOGLE_CLIENT_SECRET not found in .env file!"
+              exit 1
+            fi
+            echo "✓ .env file format verified (no leading spaces, required keys present)"
+            
+            # Show first line of each key to verify values are present (without showing full secrets)
+            echo "Verifying values are non-empty:"
+            if grep -q "^GOOGLE_CLIENT_ID=.\+" /opt/herald/.env; then
+              echo "  ✓ GOOGLE_CLIENT_ID has a value"
+            else
+              echo "  ✗ ERROR: GOOGLE_CLIENT_ID appears to be empty!"
+              exit 1
+            fi
+            if grep -q "^GOOGLE_CLIENT_SECRET=.\+" /opt/herald/.env; then
+              echo "  ✓ GOOGLE_CLIENT_SECRET has a value"
+            else
+              echo "  ✗ ERROR: GOOGLE_CLIENT_SECRET appears to be empty!"
+              exit 1
+            fi
+            
+            # Branch is passed as environment variable
+            echo "Deploying branch: ${DEPLOY_BRANCH:-main}"
+            
+            # Pull latest code from specified branch
+            BRANCH="${DEPLOY_BRANCH:-main}"
+            echo "Pulling latest code from $BRANCH branch..."
             cd /opt/herald
             chown -R herald:herald /opt/herald
-            su herald -s /bin/bash -c "cd /opt/herald && git fetch origin && git reset --hard origin/main && git clean -fd"
+            su herald -s /bin/bash -c "cd /opt/herald && git fetch origin && git reset --hard origin/$BRANCH && git clean -fd"
+
+            # Install the latest systemd service file from repo
+            echo "Installing systemd service file..."
+            sudo cp /opt/herald/deploy/herald.service /etc/systemd/system/herald.service
+            sudo systemctl daemon-reload
             
             # Update dependencies
             echo "Updating dependencies..."
@@ -97,29 +247,58 @@ jobs:
             
             # Run database migrations
             echo "Running database migrations..."
+            # The migration runner now loads .env automatically, so we just need to ensure .env exists
             # Use venv python if available, otherwise try uv run
             if [ -d "/opt/herald/.venv" ]; then
-              su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && /opt/herald/.venv/bin/python deploy/run_migrations.py"
+              su herald -s /bin/bash -c "cd /opt/herald && /opt/herald/.venv/bin/python deploy/run_migrations.py"
             else
               UV_CMD=$(find /usr/local /root/.cargo /home/herald/.cargo -name uv -type f -executable 2>/dev/null | head -1)
               if [ -n "$UV_CMD" ]; then
-                su herald -s /bin/bash -c "cd /opt/herald && if [ -f /opt/herald/.env ]; then export \$(grep -v '^#' /opt/herald/.env | grep DATABASE_URL | xargs); fi && export DATABASE_URL=\${DATABASE_URL:-postgresql+asyncpg://herald:CHANGE_ME@localhost:5432/herald} && $UV_CMD run python deploy/run_migrations.py"
+                su herald -s /bin/bash -c "cd /opt/herald && $UV_CMD run python deploy/run_migrations.py"
               else
                 echo "ERROR: Cannot run migrations - no venv and uv not found"
                 exit 1
               fi
             fi
             
-            # Restart service
-            echo "Restarting Herald service..."
+            # Verify .env file format one more time before restart
+            echo "Final .env file verification..."
+            echo "First 3 lines of .env file (showing format):"
+            head -3 /opt/herald/.env | cat -A || true
+            if grep -q "^[[:space:]]" /opt/herald/.env; then
+              echo "ERROR: .env file STILL has leading spaces after fix attempt!"
+              exit 1
+            fi
+            
+            # Reload systemd to pick up any .env changes, then restart service
+            echo "Reloading systemd and restarting Herald service..."
+            sudo systemctl daemon-reload
             sudo systemctl restart herald
             
             # Wait a moment for service to start
             sleep 3
             
+            # Verify environment variables are loaded by checking service environment
+            echo "=== Verifying Environment Variables ==="
+            SERVICE_ENV=$(sudo systemctl show herald --property=Environment --property=EnvironmentFile 2>/dev/null || echo "")
+            if echo "$SERVICE_ENV" | grep -q "GOOGLE_CLIENT_ID="; then
+              echo "✓ GOOGLE_CLIENT_ID is loaded in service environment"
+            else
+              echo "⚠ WARNING: GOOGLE_CLIENT_ID not found in service environment"
+              echo "Service EnvironmentFile: $(echo "$SERVICE_ENV" | grep EnvironmentFile || echo 'not found')"
+              echo "This may indicate the .env file is not being read correctly by systemd"
+              echo "Checking if .env file exists and is readable:"
+              ls -la /opt/herald/.env || echo ".env file not found!"
+            fi
+            
             # Check service status
             echo "=== Service Status ==="
             sudo systemctl status herald --no-pager -l || true
+            
+            # Show recent logs to verify OAuth credentials loaded
+            echo ""
+            echo "=== Recent Service Logs (checking for OAuth credentials) ==="
+            sudo journalctl -u herald -n 20 --no-pager | grep -i "oauth\|google" || echo "No OAuth-related log entries found"
             
             echo ""
             echo "=== Deployment Complete ==="

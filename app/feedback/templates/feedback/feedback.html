@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Herald - Feedback{% endblock %}
+
+{% block head %}
+<style>
+/* Make inputs full width on mobile */
+@media (max-width: 640px) {
+    .input, .textarea {
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="feedback-form" class="container mx-auto px-4 py-8 max-w-2xl">
+    
+    <!-- Header -->
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold mb-2">Feedback</h1>
+        <p class="text-base-content/70">We'd love to hear from you!</p>
+    </div>
+    
+    <!-- Success Alert -->
+    <div v-if="success" class="alert alert-success mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>Thank you for your feedback! We'll get back to you soon.</span>
+    </div>
+    
+    <!-- Error Alert -->
+    <div v-if="error" class="alert alert-error mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>[[ error ]]</span>
+        <button class="btn btn-sm btn-ghost" @click="error = null">✕</button>
+    </div>
+    
+    <!-- Feedback Form -->
+    <div v-if="!success" class="card bg-base-200 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title">Send us your feedback</h2>
+            <p class="text-sm text-base-content/70 mb-4">
+                Have a suggestion, found a bug, or just want to share your thoughts? 
+                We'd love to hear from you!
+            </p>
+            
+            <form @submit.prevent="submitFeedback" class="space-y-4">
+                <!-- Name Field -->
+                <div class="form-control">
+                    <label class="label" for="name">
+                        <span class="label-text">Name</span>
+                        <span class="label-text-alt">Required</span>
+                    </label>
+                    <input
+                        id="name"
+                        type="text"
+                        v-model="form.name"
+                        placeholder="Your name"
+                        class="input input-bordered w-full"
+                        required
+                    />
+                </div>
+                
+                <!-- Email Field -->
+                <div class="form-control">
+                    <label class="label" for="email">
+                        <span class="label-text">Email</span>
+                        <span class="label-text-alt">Required</span>
+                    </label>
+                    <input
+                        id="email"
+                        type="email"
+                        v-model="form.email"
+                        placeholder="your.email@example.com"
+                        class="input input-bordered w-full"
+                        required
+                    />
+                </div>
+                
+                <!-- Message Field -->
+                <div class="form-control">
+                    <label class="label" for="message">
+                        <span class="label-text">Message</span>
+                        <span class="label-text-alt">Required</span>
+                    </label>
+                    <textarea
+                        id="message"
+                        v-model="form.message"
+                        placeholder="Tell us what's on your mind..."
+                        class="textarea textarea-bordered h-32 w-full"
+                        required
+                    ></textarea>
+                </div>
+                
+                <!-- Submit Button -->
+                <div class="form-control mt-6">
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :disabled="submitting"
+                    >
+                        <span v-if="submitting" class="loading loading-spinner loading-sm"></span>
+                        <span v-else>Submit Feedback</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            form: {
+                name: '',
+                email: '',
+                message: ''
+            },
+            submitting: false,
+            success: false,
+            error: null
+        };
+    },
+    methods: {
+        async submitFeedback() {
+            this.submitting = true;
+            this.error = null;
+            
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(this.form)
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || `Server error: ${response.status}`);
+                }
+                
+                // Success!
+                this.success = true;
+                this.form = { name: '', email: '', message: '' };
+                
+                // Scroll to top to show success message
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+            } catch (err) {
+                this.error = err.message || 'Failed to submit feedback. Please try again.';
+            } finally {
+                this.submitting = false;
+            }
+        }
+    }
+}).mount('#feedback-form');
+</script>
+{% endblock %}

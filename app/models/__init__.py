@@ -6,6 +6,7 @@ from app.models.player import Player
 from app.models.unit import Unit, UnitState, DeploymentStatus
 from app.models.objective import Objective, ObjectiveStatus
 from app.models.event import GameEvent, EventType
+from app.models.feedback import Feedback
 
 __all__ = [
     "Base",
@@ -20,4 +21,5 @@ __all__ = [
     "ObjectiveStatus",
     "GameEvent",
     "EventType",
+    "Feedback",
 ]

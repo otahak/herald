@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% block title %}Herald - Admin Dashboard{% endblock %}
+
+{% block head %}
+<style>
+/* Make tables responsive */
+@media (max-width: 640px) {
+    .table {
+        font-size: 0.875rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="admin-dashboard" class="container mx-auto px-4 py-8 max-w-7xl">
+    
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-3xl font-bold mb-2">Admin Dashboard</h1>
+            <p class="text-base-content/70">Manage feedback, view statistics, and monitor activity</p>
+        </div>
+        <div>
+            <a href="{{ get_base_path() }}/admin/logout" class="btn btn-outline btn-sm">Logout</a>
+        </div>
+    </div>
+    
+    <!-- Error Alert -->
+    <div v-if="error" class="alert alert-error mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span>[[ error ]]</span>
+        <button class="btn btn-sm btn-ghost" @click="error = null">✕</button>
+    </div>
+    
+    <!-- Tab Selection -->
+    <div class="tabs tabs-boxed justify-center mb-6">
+        <a class="tab" :class="{ 'tab-active': activeTab === 'stats' }" @click="activeTab = 'stats'">
+            Statistics
+        </a>
+        <a class="tab" :class="{ 'tab-active': activeTab === 'feedback' }" @click="activeTab = 'feedback'">
+            Feedback <span v-if="stats && stats.unread_feedback > 0" class="badge badge-error badge-sm ml-1">[[ stats.unread_feedback ]]</span>
+        </a>
+        <a class="tab" :class="{ 'tab-active': activeTab === 'events' }" @click="activeTab = 'events'">
+            Recent Events
+        </a>
+    </div>
+    
+    <!-- Statistics Tab -->
+    <div v-if="activeTab === 'stats'" class="space-y-6">
+        <div v-if="loading" class="text-center py-8">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else-if="stats" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Stats Cards -->
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Total Games</div>
+                <div class="stat-value text-primary">[[ stats.total_games ]]</div>
+                <div class="stat-desc">[[ stats.active_games ]] active</div>
+            </div>
+            
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Total Players</div>
+                <div class="stat-value text-secondary">[[ stats.total_players ]]</div>
+                <div class="stat-desc">Across all games</div>
+            </div>
+            
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Total Units</div>
+                <div class="stat-value text-accent">[[ stats.total_units ]]</div>
+                <div class="stat-desc">Units imported</div>
+            </div>
+            
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Feedback</div>
+                <div class="stat-value text-info">[[ stats.total_feedback ]]</div>
+                <div class="stat-desc">[[ stats.unread_feedback ]] unread</div>
+            </div>
+            
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Games (24h)</div>
+                <div class="stat-value">[[ stats.games_last_24h ]]</div>
+                <div class="stat-desc">Created today</div>
+            </div>
+            
+            <div class="stat bg-base-200 rounded-lg shadow">
+                <div class="stat-title">Games (7d)</div>
+                <div class="stat-value">[[ stats.games_last_7d ]]</div>
+                <div class="stat-desc">Created this week</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Feedback Tab -->
+    <div v-if="activeTab === 'feedback'" class="space-y-4">
+        <div class="flex justify-between items-center">
+            <h2 class="text-2xl font-bold">Feedback Submissions</h2>
+            <div class="flex gap-2">
+                <button 
+                    class="btn btn-sm"
+                    :class="showUnreadOnly ? 'btn-primary' : 'btn-outline'"
+                    @click="toggleUnreadFilter"
+                >
+                    [[ showUnreadOnly ? 'Show All' : 'Unread Only' ]]
+                </button>
+                <button class="btn btn-sm btn-outline" @click="loadFeedback">
+                    <span v-if="loadingFeedback" class="loading loading-spinner loading-xs"></span>
+                    <span v-else>Refresh</span>
+                </button>
+            </div>
+        </div>
+        
+        <div v-if="loadingFeedback" class="text-center py-8">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else-if="feedbackList.length === 0" class="alert alert-info">
+            <span>No feedback submissions found.</span>
+        </div>
+        
+        <div v-else class="space-y-4">
+            <div 
+                v-for="item in feedbackList" 
+                :key="item.id"
+                class="card bg-base-200 shadow"
+                :class="{ 'border-l-4 border-primary': !item.read }"
+            >
+                <div class="card-body">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2 mb-2">
+                                <h3 class="card-title text-lg">[[ item.name ]]</h3>
+                                <span v-if="!item.read" class="badge badge-primary badge-sm">New</span>
+                            </div>
+                            <p class="text-sm text-base-content/70 mb-2">
+                                <a :href="'mailto:' + item.email" class="link link-primary">[[ item.email ]]</a>
+                            </p>
+                            <p class="text-base-content/90 whitespace-pre-wrap">[[ item.message ]]</p>
+                            <p class="text-xs text-base-content/50 mt-2">
+                                Submitted: [[ formatDate(item.created_at) ]]
+                            </p>
+                        </div>
+                        <div v-if="!item.read" class="ml-4">
+                            <button 
+                                class="btn btn-sm btn-primary"
+                                @click="markAsRead(item.id)"
+                            >
+                                Mark Read
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Events Tab -->
+    <div v-if="activeTab === 'events'" class="space-y-4">
+        <div class="flex justify-between items-center">
+            <h2 class="text-2xl font-bold">Recent Game Events</h2>
+            <button class="btn btn-sm btn-outline" @click="loadEvents">
+                <span v-if="loadingEvents" class="loading loading-spinner loading-xs"></span>
+                <span v-else>Refresh</span>
+            </button>
+        </div>
+        
+        <div v-if="loadingEvents" class="text-center py-8">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+        
+        <div v-else-if="eventsList.length === 0" class="alert alert-info">
+            <span>No events found.</span>
+        </div>
+        
+        <div v-else class="overflow-x-auto">
+            <table class="table table-zebra">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th>Game</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="event in eventsList" :key="event.id">
+                        <td class="text-xs">[[ formatDate(event.created_at) ]]</td>
+                        <td>
+                            <span class="badge badge-sm">[[ event.event_type ]]</span>
+                        </td>
+                        <td>[[ event.description ]]</td>
+                        <td>
+                            <a v-if="event.game_code" :href="'/game/' + event.game_code" class="link link-primary">
+                                [[ event.game_code ]]
+                            </a>
+                            <span v-else class="text-base-content/50">-</span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+const app = createApp({
+    data() {
+        return {
+            basePath: '{{ get_base_path() }}',
+            activeTab: 'stats',
+            loading: false,
+            loadingFeedback: false,
+            loadingEvents: false,
+            error: null,
+            stats: null,
+            feedbackList: [],
+            eventsList: [],
+            showUnreadOnly: false
+        };
+    },
+    mounted() {
+        this.loadStats();
+        this.loadFeedback();
+        this.loadEvents();
+    },
+    methods: {
+        async loadStats() {
+            this.loading = true;
+            this.error = null;
+            try {
+                const response = await fetch(`${this.basePath}/api/admin/stats`);
+                if (!response.ok) {
+                    let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        console.error('Error response data:', errorData);
+                        // Try different possible error response formats
+                        errorMsg = errorData.detail?.error || 
+                                  errorData.detail || 
+                                  errorData.error || 
+                                  errorData.message ||
+                                  JSON.stringify(errorData) ||
+                                  errorMsg;
+                    } catch (e) {
+                        // If JSON parsing fails, try to get text
+                        try {
+                            const text = await response.text();
+                            console.error('Error response text:', text);
+                            errorMsg = text || errorMsg;
+                        } catch (e2) {
+                            console.error('Could not parse error response:', e2);
+                        }
+                    }
+                    throw new Error(errorMsg);
+                }
+                this.stats = await response.json();
+            } catch (err) {
+                this.error = err.message || 'Failed to load statistics';
+                console.error('Error loading stats:', err, err.stack);
+            } finally {
+                this.loading = false;
+            }
+        },
+        async loadFeedback() {
+            this.loadingFeedback = true;
+            this.error = null;
+            try {
+                const url = `${this.basePath}/api/admin/feedback${this.showUnreadOnly ? '?unread_only=true' : ''}`;
+                const response = await fetch(url);
+                if (!response.ok) {
+                    let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        console.error('Error response data:', errorData);
+                        // Try different possible error response formats
+                        errorMsg = errorData.detail?.error || 
+                                  errorData.detail || 
+                                  errorData.error || 
+                                  errorData.message ||
+                                  JSON.stringify(errorData) ||
+                                  errorMsg;
+                    } catch (e) {
+                        // If JSON parsing fails, try to get text
+                        try {
+                            const text = await response.text();
+                            console.error('Error response text:', text);
+                            errorMsg = text || errorMsg;
+                        } catch (e2) {
+                            console.error('Could not parse error response:', e2);
+                        }
+                    }
+                    throw new Error(errorMsg);
+                }
+                this.feedbackList = await response.json();
+            } catch (err) {
+                this.error = err.message || 'Failed to load feedback';
+                console.error('Error loading feedback:', err, err.stack);
+            } finally {
+                this.loadingFeedback = false;
+            }
+        },
+        async loadEvents() {
+            this.loadingEvents = true;
+            this.error = null;
+            try {
+                const response = await fetch(`${this.basePath}/api/admin/events/recent?limit=50`);
+                if (!response.ok) throw new Error('Failed to load events');
+                this.eventsList = await response.json();
+            } catch (err) {
+                this.error = err.message || 'Failed to load events';
+                console.error('Error loading events:', err);
+            } finally {
+                this.loadingEvents = false;
+            }
+        },
+        async markAsRead(feedbackId) {
+            try {
+                const response = await fetch(`${this.basePath}/api/admin/feedback/${feedbackId}/read`, {
+                    method: 'PATCH'
+                });
+                if (!response.ok) throw new Error('Failed to mark as read');
+                const result = await response.json();
+                if (result.success) {
+                    // Reload feedback list
+                    await this.loadFeedback();
+                    // Reload stats to update unread count
+                    await this.loadStats();
+                }
+            } catch (err) {
+                this.error = err.message || 'Failed to mark feedback as read';
+                console.error('Error marking as read:', err);
+            }
+        },
+        toggleUnreadFilter() {
+            this.showUnreadOnly = !this.showUnreadOnly;
+            this.loadFeedback();
+        },
+        formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        }
+    },
+    watch: {
+        activeTab(newTab) {
+            if (newTab === 'stats' && !this.stats) {
+                this.loadStats();
+            } else if (newTab === 'feedback' && this.feedbackList.length === 0) {
+                this.loadFeedback();
+            } else if (newTab === 'events' && this.eventsList.length === 0) {
+                this.loadEvents();
+            }
+        }
+    }
+});
+
+// Set custom delimiters to avoid conflicts with Jinja2
+app.config.compilerOptions.delimiters = ['[[', ']]'];
+app.mount('#admin-dashboard');
+</script>
+{% endblock %}

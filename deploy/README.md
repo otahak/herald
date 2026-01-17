@@ -95,10 +95,10 @@ sudo -u postgres psql
 
 ```sql
 CREATE DATABASE herald;
-CREATE USER herald WITH PASSWORD 'your-secure-password';
-GRANT ALL PRIVILEGES ON DATABASE herald TO herald;
+ALTER USER postgres WITH PASSWORD 'your-secure-password';
+GRANT ALL PRIVILEGES ON DATABASE herald TO postgres;
 \c herald
-GRANT ALL ON SCHEMA public TO herald;
+GRANT ALL ON SCHEMA public TO postgres;
 \q
 ```
 
@@ -106,7 +106,7 @@ GRANT ALL ON SCHEMA public TO herald;
 
 ```bash
 sudo -u herald cat > /opt/herald/.env << EOF
-DATABASE_URL=postgresql+asyncpg://herald:your-secure-password@localhost:5432/herald
+DATABASE_URL=postgresql+asyncpg://postgres:your-secure-password@localhost:5432/herald
 APP_DEBUG=false
 EOF
 sudo chmod 600 /opt/herald/.env
@@ -117,7 +117,7 @@ sudo chmod 600 /opt/herald/.env
 ```bash
 sudo -u herald bash
 cd /opt/herald
-export DATABASE_URL="postgresql+asyncpg://herald:your-secure-password@localhost:5432/herald"
+export DATABASE_URL="postgresql+asyncpg://postgres:your-secure-password@localhost:5432/herald"
 python3 deploy/init_db.py
 exit
 ```

@@ -1,6 +1,14 @@
-<!-- Navigation - reserved for future links -->
-<nav class="navbar bg-base-100 border-b border-base-300 hidden">
-    <ul class="menu menu-horizontal">
-        <!-- Add navigation links here as needed -->
-    </ul>
+<!-- Navigation -->
+<nav class="navbar bg-base-100 border-b border-base-300">
+    <div class="container mx-auto px-4">
+        <div class="flex-1">
+            <a href="{{ get_base_path() }}/" class="btn btn-ghost text-xl">Herald</a>
+        </div>
+        <div class="flex-none">
+            <ul class="menu menu-horizontal px-1">
+                <li><a href="{{ get_base_path() }}/" class="btn btn-ghost">Home</a></li>
+                <li><a href="{{ get_base_path() }}/feedback" class="btn btn-ghost">Feedback</a></li>
+            </ul>
+        </div>
+    </div>
 </nav>
