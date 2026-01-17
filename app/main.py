@@ -1,4 +1,5 @@
 import logging
+import os
 from os import getenv
 from pathlib import Path
 
@@ -27,11 +28,56 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("Herald")
+
+# Try to load .env file directly as fallback if systemd didn't load it
+# This is a workaround for systemd EnvironmentFile issues
+ENV_FILE_PATHS = [
+    Path("/opt/herald/.env"),
+    Path(__file__).parent.parent / ".env",
+    Path(__file__).parent.parent.parent / ".env",
+]
+
+def load_env_file_fallback():
+    """Load .env file directly if environment variables aren't set."""
+    for env_file in ENV_FILE_PATHS:
+        if env_file.exists() and env_file.is_file():
+            try:
+                logger.info(f"Attempting to load .env file from: {env_file}")
+                with open(env_file, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if not line or line.startswith("#"):
+                            continue
+                        # Parse KEY=VALUE format
+                        if "=" in line:
+                            key, value = line.split("=", 1)
+                            key = key.strip()
+                            value = value.strip()
+                            # Remove quotes if present
+                            if value.startswith('"') and value.endswith('"'):
+                                value = value[1:-1]
+                            elif value.startswith("'") and value.endswith("'"):
+                                value = value[1:-1]
+                            # Only set if not already in environment
+                            if key and value and key not in os.environ:
+                                os.environ[key] = value
+                                logger.debug(f"Loaded {key} from .env file")
+                logger.info(f"✓ Loaded .env file from: {env_file}")
+                return True
+            except Exception as e:
+                logger.warning(f"Could not load .env file from {env_file}: {e}")
+    return False
+
+# Load .env file if OAuth credentials aren't in environment
+if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
+    logger.warning("OAuth credentials not in environment, attempting to load from .env file...")
+    load_env_file_fallback()
+
 logger.info(f"Starting app in {'DEBUG' if DEBUG else 'PRODUCTION'} mode")
 logger.info(f"Database URL: {DATABASE_URL}")
 
 # Check OAuth environment variables at startup
-from os import getenv
 google_client_id = getenv("GOOGLE_CLIENT_ID")
 google_client_secret = getenv("GOOGLE_CLIENT_SECRET")
 if google_client_id and google_client_secret:
