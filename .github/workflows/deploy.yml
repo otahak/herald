@@ -187,6 +187,11 @@ jobs:
             cd /opt/herald
             chown -R herald:herald /opt/herald
             su herald -s /bin/bash -c "cd /opt/herald && git fetch origin && git reset --hard origin/$BRANCH && git clean -fd"
+
+            # Install the latest systemd service file from repo
+            echo "Installing systemd service file..."
+            sudo cp /opt/herald/deploy/herald.service /etc/systemd/system/herald.service
+            sudo systemctl daemon-reload
             
             # Update dependencies
             echo "Updating dependencies..."

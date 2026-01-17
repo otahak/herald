@@ -56,28 +56,28 @@ EOF
 
 # Set up PostgreSQL
 echo "Setting up PostgreSQL..."
-DB_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
+DB_PASSWORD="postgres"
 sudo -u postgres psql << EOF
 CREATE DATABASE herald;
-CREATE USER herald WITH PASSWORD '$DB_PASSWORD';
-GRANT ALL PRIVILEGES ON DATABASE herald TO herald;
+ALTER USER postgres WITH PASSWORD '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON DATABASE herald TO postgres;
 \c herald
-GRANT ALL ON SCHEMA public TO herald;
+GRANT ALL ON SCHEMA public TO postgres;
 EOF
 
-echo "Database password generated: $DB_PASSWORD"
-echo "Saving password to .env and service file..."
+echo "Database password set for postgres user"
+echo "Saving database config to .env..."
 
 # Create .env file with generated password
 cat > "$APP_DIR/.env" << EOF
-DATABASE_URL=postgresql+asyncpg://herald:${DB_PASSWORD}@localhost:5432/herald
+DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD}@localhost:5432/herald
 APP_DEBUG=false
 EOF
 chown herald:herald "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"
 
-# Install systemd service with password
-sed "s|CHANGE_ME|${DB_PASSWORD}|g" "$APP_DIR/deploy/herald.service" > /etc/systemd/system/herald.service
+# Install systemd service
+cp "$APP_DIR/deploy/herald.service" /etc/systemd/system/herald.service
 systemctl daemon-reload
 systemctl enable herald
 
@@ -92,7 +92,7 @@ nginx -t && systemctl reload nginx
 echo "Initializing database schema..."
 sudo -u herald bash << EOF
 cd /opt/herald
-export DATABASE_URL="postgresql+asyncpg://herald:${DB_PASSWORD}@localhost:5432/herald"
+export DATABASE_URL="postgresql+asyncpg://postgres:${DB_PASSWORD}@localhost:5432/herald"
 python3 deploy/init_db.py
 EOF
 
