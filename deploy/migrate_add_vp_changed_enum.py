@@ -76,7 +76,9 @@ async def migrate():
     
     print("Attempting to connect to database...")
     try:
-        async with engine.begin() as conn:
+        # Use connect() instead of begin() because ALTER TYPE ADD VALUE 
+        # cannot be run inside a transaction block in PostgreSQL
+        async with engine.connect() as conn:
             # First check if the enum type exists
             type_check = text("""
                 SELECT EXISTS (
@@ -108,10 +110,12 @@ async def migrate():
                 # Add the new enum value
                 # Note: PostgreSQL does not support IF NOT EXISTS for ALTER TYPE ADD VALUE
                 # We check first above to ensure idempotency
+                # ALTER TYPE ADD VALUE must be run outside a transaction block
                 alter_query = text("""
                     ALTER TYPE eventtype ADD VALUE 'vp_changed'
                 """)
                 await conn.execute(alter_query)
+                await conn.commit()  # Explicit commit for ALTER TYPE
                 print("Successfully added 'vp_changed' to eventtype enum!")
     except Exception as e:
         print(f"ERROR: Failed to connect to database: {e}")
