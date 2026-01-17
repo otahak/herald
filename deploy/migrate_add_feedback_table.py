@@ -146,8 +146,26 @@ async def main():
                 """)
                 await session.execute(create_index_stmt2)
                 
+                # Grant permissions to herald user (or the user from DATABASE_URL)
+                # Extract username from DATABASE_URL if available
+                db_user = "herald"  # default
+                if database_url and "@" in database_url:
+                    try:
+                        # Parse: postgresql+asyncpg://user:pass@host:port/db
+                        user_part = database_url.split("://")[1].split("@")[0]
+                        db_user = user_part.split(":")[0]
+                    except Exception:
+                        pass
+                
+                grant_stmt = text(f"""
+                    GRANT ALL PRIVILEGES ON TABLE feedback TO {db_user};
+                    GRANT USAGE, SELECT ON SEQUENCE IF EXISTS feedback_id_seq TO {db_user};
+                """)
+                await session.execute(grant_stmt)
+                
                 await session.commit()
-                print("✓ Feedback table created successfully")
+                print(f"✓ Feedback table created successfully")
+                print(f"✓ Permissions granted to user: {db_user}")
             except Exception as e:
                 await session.rollback()
                 print(f"✗ Error during migration: {e}")
