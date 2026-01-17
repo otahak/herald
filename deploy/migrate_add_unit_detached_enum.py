@@ -110,12 +110,22 @@ async def migrate():
                 # Note: PostgreSQL does not support IF NOT EXISTS for ALTER TYPE ADD VALUE
                 # We check first above to ensure idempotency
                 # ALTER TYPE ADD VALUE must be run outside a transaction block
-                alter_query = text("""
-                    ALTER TYPE eventtype ADD VALUE 'UNIT_DETACHED'
-                """)
-                await conn.execute(alter_query)
-                await conn.commit()  # Explicit commit for ALTER TYPE
-                print("Successfully added 'UNIT_DETACHED' to eventtype enum!")
+                try:
+                    alter_query = text("""
+                        ALTER TYPE eventtype ADD VALUE 'UNIT_DETACHED'
+                    """)
+                    await conn.execute(alter_query)
+                    await conn.commit()  # Explicit commit for ALTER TYPE
+                    print("Successfully added 'UNIT_DETACHED' to eventtype enum!")
+                except Exception as e:
+                    # Handle case where value was added between check and ALTER
+                    # (race condition or case sensitivity issue)
+                    error_str = str(e).lower()
+                    if 'duplicate' in error_str or 'already exists' in error_str:
+                        print("Enum value 'UNIT_DETACHED' already exists (detected during add). Skipping.")
+                        await conn.commit()  # Commit any partial state
+                    else:
+                        raise
     except Exception as e:
         print(f"ERROR: Failed to connect to database: {e}")
         import traceback
