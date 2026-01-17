@@ -63,7 +63,7 @@ from litestar.template.config import TemplateConfig
 from typing import Any
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR, HTTP_401_UNAUTHORIZED
 from litestar.response import Response, Redirect
-from litestar.exceptions import NotAuthorizedException
+from litestar.exceptions import NotAuthorizedException, HTTPException
 
 from app.routes import ROUTES
 from app.models import Base  # Import models Base for table creation
@@ -137,9 +137,22 @@ template_config = TemplateConfig(
 
 # --- Exception handler
 def log_exceptions(request: Request, exc: Exception) -> Response:
+    """Handle unhandled exceptions."""
+    from litestar.exceptions import HTTPException
+    
+    # If it's already an HTTPException, preserve its details
+    if isinstance(exc, HTTPException):
+        logger.warning(f"HTTPException: {exc.detail} (status: {exc.status_code})")
+        return Response(
+            content={"detail": exc.detail, "status_code": exc.status_code},
+            status_code=exc.status_code,
+            media_type="application/json"
+        )
+    
+    # For other exceptions, log and return generic error
     logger.exception("Unhandled exception occurred", exc_info=exc)
     return Response(
-        content={"detail": "Internal Server Error"},
+        content={"detail": {"error": str(exc), "type": type(exc).__name__}},
         status_code=HTTP_500_INTERNAL_SERVER_ERROR,
         media_type="application/json"
     )

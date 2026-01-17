@@ -235,14 +235,33 @@ const app = createApp({
             try {
                 const response = await fetch(`${this.basePath}/api/admin/stats`);
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-                    const errorMsg = errorData.detail?.error || errorData.detail || `HTTP ${response.status}`;
+                    let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        console.error('Error response data:', errorData);
+                        // Try different possible error response formats
+                        errorMsg = errorData.detail?.error || 
+                                  errorData.detail || 
+                                  errorData.error || 
+                                  errorData.message ||
+                                  JSON.stringify(errorData) ||
+                                  errorMsg;
+                    } catch (e) {
+                        // If JSON parsing fails, try to get text
+                        try {
+                            const text = await response.text();
+                            console.error('Error response text:', text);
+                            errorMsg = text || errorMsg;
+                        } catch (e2) {
+                            console.error('Could not parse error response:', e2);
+                        }
+                    }
                     throw new Error(errorMsg);
                 }
                 this.stats = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load statistics';
-                console.error('Error loading stats:', err);
+                console.error('Error loading stats:', err, err.stack);
             } finally {
                 this.loading = false;
             }
@@ -254,14 +273,33 @@ const app = createApp({
                 const url = `${this.basePath}/api/admin/feedback${this.showUnreadOnly ? '?unread_only=true' : ''}`;
                 const response = await fetch(url);
                 if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-                    const errorMsg = errorData.detail?.error || errorData.detail || `HTTP ${response.status}`;
+                    let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                    try {
+                        const errorData = await response.json();
+                        console.error('Error response data:', errorData);
+                        // Try different possible error response formats
+                        errorMsg = errorData.detail?.error || 
+                                  errorData.detail || 
+                                  errorData.error || 
+                                  errorData.message ||
+                                  JSON.stringify(errorData) ||
+                                  errorMsg;
+                    } catch (e) {
+                        // If JSON parsing fails, try to get text
+                        try {
+                            const text = await response.text();
+                            console.error('Error response text:', text);
+                            errorMsg = text || errorMsg;
+                        } catch (e2) {
+                            console.error('Could not parse error response:', e2);
+                        }
+                    }
                     throw new Error(errorMsg);
                 }
                 this.feedbackList = await response.json();
             } catch (err) {
                 this.error = err.message || 'Failed to load feedback';
-                console.error('Error loading feedback:', err);
+                console.error('Error loading feedback:', err, err.stack);
             } finally {
                 this.loadingFeedback = false;
             }
