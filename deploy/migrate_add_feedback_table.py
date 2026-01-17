@@ -119,7 +119,18 @@ async def main():
                 
                 print("Creating feedback table...")
                 
-                # Create feedback table
+                # Get the current database user - table will be owned by this user
+                current_user_stmt = text("SELECT current_user;")
+                result = await session.execute(current_user_stmt)
+                current_user = result.scalar()
+                print(f"Creating table as database user: {current_user}")
+                
+                # Create feedback table (will be owned by current_user automatically)
+                # If table already exists with wrong owner, drop it first
+                drop_table_stmt = text("DROP TABLE IF EXISTS feedback CASCADE;")
+                await session.execute(drop_table_stmt)
+                print("Dropped existing feedback table (if any) to fix ownership...")
+                
                 create_table_stmt = text("""
                     CREATE TABLE feedback (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -133,6 +144,7 @@ async def main():
                 """)
                 
                 await session.execute(create_table_stmt)
+                print(f"✓ Feedback table created (owned by: {current_user})")
                 
                 # Create index on read status for faster queries
                 create_index_stmt = text("""
@@ -145,23 +157,6 @@ async def main():
                     CREATE INDEX IF NOT EXISTS ix_feedback_created_at ON feedback(created_at DESC);
                 """)
                 await session.execute(create_index_stmt2)
-                
-                # Grant permissions to herald user (or the user from DATABASE_URL)
-                # Extract username from DATABASE_URL if available
-                db_user = "herald"  # default
-                if database_url and "@" in database_url:
-                    try:
-                        # Parse: postgresql+asyncpg://user:pass@host:port/db
-                        user_part = database_url.split("://")[1].split("@")[0]
-                        db_user = user_part.split(":")[0]
-                    except Exception:
-                        pass
-                
-                grant_stmt = text(f"""
-                    GRANT ALL PRIVILEGES ON TABLE feedback TO {db_user};
-                    GRANT USAGE, SELECT ON SEQUENCE IF EXISTS feedback_id_seq TO {db_user};
-                """)
-                await session.execute(grant_stmt)
                 
                 await session.commit()
                 print(f"✓ Feedback table created successfully")
