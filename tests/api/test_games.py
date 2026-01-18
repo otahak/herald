@@ -1098,3 +1098,388 @@ async def test_clear_all_units_with_no_units(client):
         assert data["success"] is True
         assert data["units_cleared"] == 0
 
+
+@pytest.mark.asyncio
+async def test_log_unit_action_rush(client):
+    """Test logging a rush action."""
+    # Create game, join, and create a unit
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ActionTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    # Create a unit for host
+    resp_unit = await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Test Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    assert resp_unit.status_code == 201
+    unit_id = resp_unit.json()["id"]
+    
+    # Create a unit for guest (required to start game)
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Guest Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    
+    # Start the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Log a rush action
+    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+        resp_action = await client.post(
+            f"/api/games/{code}/units/{unit_id}/actions",
+            json={"action": "rush"},
+        )
+        assert resp_action.status_code in (200, 201)
+        data = resp_action.json()
+        assert data["success"] is True
+        assert "rushed" in data["message"].lower()
+    
+    # Check that event was created
+    resp_events = await client.get(f"/api/games/{code}/events")
+    assert resp_events.status_code == 200
+    events = resp_events.json()
+    rush_events = [e for e in events if e["event_type"] == "unit_rushed"]
+    assert len(rush_events) == 1
+    assert "rushed" in rush_events[0]["description"].lower()
+    
+    # Check that unit is activated
+    resp_game = await client.get(f"/api/games/{code}")
+    units = resp_game.json().get("units", [])
+    unit = next((u for u in units if u["id"] == unit_id), None)
+    assert unit is not None
+    assert unit["state"]["activated_this_round"] is True
+
+
+@pytest.mark.asyncio
+async def test_log_unit_action_charge_with_targets(client):
+    """Test logging a charge action with target units."""
+    # Create game, join, and create units for both players
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ChargeTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    # Create unit for host
+    resp_unit1 = await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Charging Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    assert resp_unit1.status_code == 201
+    unit1_id = resp_unit1.json()["id"]
+    
+    # Create unit for guest (target)
+    resp_unit2 = await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Target Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    assert resp_unit2.status_code == 201
+    unit2_id = resp_unit2.json()["id"]
+    
+    # Start the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Log a charge action with target
+    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+        resp_action = await client.post(
+            f"/api/games/{code}/units/{unit1_id}/actions",
+            json={"action": "charge", "target_unit_ids": [unit2_id]},
+        )
+        assert resp_action.status_code in (200, 201)
+        data = resp_action.json()
+        assert data["success"] is True
+        assert "charged" in data["message"].lower() or "charge" in data["message"].lower()
+        assert "Target Unit" in data["message"]
+    
+    # Check that event was created with target info
+    resp_events = await client.get(f"/api/games/{code}/events")
+    assert resp_events.status_code == 200
+    events = resp_events.json()
+    charge_events = [e for e in events if e["event_type"] == "unit_charged"]
+    assert len(charge_events) == 1
+    assert "charged" in charge_events[0]["description"].lower()
+    assert "Target Unit" in charge_events[0]["description"]
+    assert charge_events[0]["details"] is not None
+    assert "target_unit_ids" in charge_events[0]["details"]
+
+
+@pytest.mark.asyncio
+async def test_log_unit_action_invalid_action(client):
+    """Test that invalid action types are rejected."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "InvalidActionTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    # Create units for both players
+    resp_unit = await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Test Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    unit_id = resp_unit.json()["id"]
+    
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Guest Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    
+    # Start the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Try invalid action
+    resp_action = await client.post(
+        f"/api/games/{code}/units/{unit_id}/actions",
+        json={"action": "invalid_action"},
+    )
+    assert resp_action.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_log_unit_action_charge_requires_targets(client):
+    """Test that charge/attack actions require targets."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ChargeTargetTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    # Create units for both players
+    resp_unit = await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Test Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    unit_id = resp_unit.json()["id"]
+    
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Guest Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    
+    # Start the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Try charge without targets
+    resp_action = await client.post(
+        f"/api/games/{code}/units/{unit_id}/actions",
+        json={"action": "charge"},
+    )
+    assert resp_action.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_export_events(client):
+    """Test exporting events as markdown."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ExportTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Host Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Guest Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    
+    # Create some events by starting the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Export events
+    resp_export = await client.get(f"/api/games/{code}/events/export")
+    assert resp_export.status_code == 200
+    assert "text/markdown" in resp_export.headers.get("content-type", "")
+    assert f"game-{code}-events.md" in resp_export.headers["content-disposition"]
+    
+    content = resp_export.text
+    assert "Game Log:" in content
+    assert code in content
+    assert "Events" in content
+
+
+@pytest.mark.asyncio
+async def test_clear_events(client):
+    """Test clearing all events."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ClearEventsTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    
+    # Create units for both players
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Host Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": guest_id,
+            "name": "Guest Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 100,
+        },
+    )
+    
+    # Create some events by starting the game
+    await client.post(f"/api/games/{code}/start")
+    
+    # Verify events exist
+    resp_events = await client.get(f"/api/games/{code}/events")
+    assert resp_events.status_code == 200
+    events_before = resp_events.json()
+    assert len(events_before) > 0
+    
+    # Clear events
+    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+        resp_clear = await client.delete(f"/api/games/{code}/events")
+        assert resp_clear.status_code == 200
+        data = resp_clear.json()
+        assert data["success"] is True
+        assert data["deleted_count"] > 0
+    
+    # Verify events are gone
+    resp_events_after = await client.get(f"/api/games/{code}/events")
+    assert resp_events_after.status_code == 200
+    events_after = resp_events_after.json()
+    assert len(events_after) == 0
+

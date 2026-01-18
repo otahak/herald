@@ -1,5 +1,7 @@
 import logging
 import os
+import sys
+import subprocess
 from os import getenv
 from pathlib import Path
 
@@ -203,12 +205,67 @@ def handle_auth_exception(request: Request, exc: NotAuthorizedException) -> Resp
         media_type="application/json"
     )
 
+# --- Migration runner (runs on startup)
+async def run_startup_migrations(app: Litestar) -> None:
+    """Run pending migrations on application startup."""
+    try:
+        # Only run migrations in production or when explicitly enabled
+        # Skip in development to avoid slowing down startup
+        # Also skip if using SQLite (tests) - migrations are PostgreSQL-specific
+        database_url = os.getenv("DATABASE_URL", "")
+        if "sqlite" in database_url.lower():
+            logger.debug("Skipping migrations (SQLite detected - migrations are PostgreSQL-specific)")
+            return
+        
+        run_migrations = os.getenv("AUTO_RUN_MIGRATIONS", "true").lower() == "true"
+        
+        if not run_migrations:
+            logger.debug("Auto-running migrations is disabled (set AUTO_RUN_MIGRATIONS=false to disable)")
+            return
+        
+        logger.info("Checking for pending migrations...")
+        from pathlib import Path
+        
+        deploy_dir = Path(__file__).parent.parent / "deploy"
+        migration_script = deploy_dir / "run_pending_migrations.py"
+        
+        if not migration_script.exists():
+            logger.warning(f"Migration script not found at {migration_script}")
+            return
+        
+        # Run migration script
+        result = subprocess.run(
+            [sys.executable, str(migration_script)],
+            cwd=str(Path(__file__).parent.parent),
+            env=os.environ,
+            capture_output=True,
+            text=True,
+            timeout=60,  # 60 second timeout
+        )
+        
+        if result.returncode == 0:
+            if result.stdout:
+                logger.info("Migrations completed successfully")
+                if DEBUG:
+                    logger.debug(f"Migration output: {result.stdout}")
+        else:
+            logger.error(f"Migration failed with exit code {result.returncode}")
+            if result.stderr:
+                logger.error(f"Migration error: {result.stderr}")
+            # Don't fail startup - log error but continue
+    except subprocess.TimeoutExpired:
+        logger.error("Migration script timed out after 60 seconds")
+    except Exception as e:
+        logger.error(f"Error running migrations on startup: {e}", exc_info=True)
+        # Don't fail startup - log error but continue
+
 # --- App init
 app = Litestar(
     route_handlers=ROUTES,
     debug=DEBUG,
     plugins=[plugin],
     template_config=template_config,
+    on_startup=[run_startup_migrations],
     exception_handlers={
         Exception: log_exceptions,
         NotAuthorizedException: handle_auth_exception,

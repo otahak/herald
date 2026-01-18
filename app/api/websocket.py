@@ -247,6 +247,8 @@ async def game_websocket(
     - Client sends state updates, server broadcasts to other clients
     - Server sends events when other players make changes
     
+    Note: Solo games skip WebSocket connection (no sync needed).
+    
     Message types (client -> server):
     - {"type": "join", "player_id": "uuid"}
     - {"type": "update_unit", "unit_id": "uuid", "changes": {...}}
@@ -265,6 +267,14 @@ async def game_websocket(
     - {"type": "pong"}
     - {"type": "error", "message": "..."}
     """
+    # Check if game is in solo mode - skip WebSocket for solo games
+    from app.api.games import get_game_by_code
+    game = await get_game_by_code(session, code)
+    if game.is_solo:
+        await socket.close(code=1008, reason="Solo games do not use WebSocket")
+        logger.info(f"WebSocket connection rejected for solo game {code}")
+        return
+    
     await socket.accept()
     
     room = room_manager.get_room(code)
@@ -306,12 +316,24 @@ async def game_websocket(
                     row = result.first()
                     
                     if row:
-                        # Mark connected
+                        # Mark connected and update game activity
+                        from datetime import datetime, timezone
+                        from app.models import Game
+                        
+                        # Update player connection status
                         await session.execute(
                             Player.__table__.update()
                             .where(Player.id == player_id)
                             .values(is_connected=True)
                         )
+                        
+                        # Update game activity tracking
+                        await session.execute(
+                            Game.__table__.update()
+                            .where(Game.code == code.upper())
+                            .values(last_activity_at=datetime.now(timezone.utc))
+                        )
+                        
                         await session.commit()
                         
                         # Notify others
