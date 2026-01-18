@@ -534,6 +534,49 @@ const GameStore = {
         },
         
         /**
+         * Log a unit action (rush, advance, hold, charge, attack)
+         */
+        async logUnitAction(code, unitId, action, targetUnitIds = []) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/actions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: action,
+                        target_unit_ids: targetUnitIds.length > 0 ? targetUnitIds : null,
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to log unit action');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state to get updated unit activation status
+                await this.fetchGame(code);
+                
+                // Fetch events for solo mode compatibility
+                await this.fetchEvents();
+                
+                // Broadcast to other players via WebSocket
+                this.broadcastStateUpdate({ 
+                    type: 'unit_action_logged', 
+                    unit_id: unitId,
+                    action: action,
+                });
+                
+                return result;
+            } catch (error) {
+                // Don't set global error state for action logging failures - these should be handled locally
+                Debug.error('Unit action logging failed (non-critical):', error.message);
+                throw error;
+            }
+        },
+        
+        /**
          * Update objective state
          */
         async updateObjective(objectiveId, status, controlledById = null) {

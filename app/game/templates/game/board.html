@@ -194,6 +194,7 @@
                             :unit="unit"
                             :is-mine="leftPlayer.id === currentPlayerId"
                             @update="updateUnit"
+                            @open-action-modal="openActionModal"
                         ></unit-card>
                     </div>
                 </div>
@@ -423,13 +424,23 @@
                 <div class="game-log flex-1 overflow-hidden flex flex-col">
                     <div class="p-2 border-b border-base-300 flex justify-between items-center">
                         <h3 class="font-bold text-sm">Game Log</h3>
-                        <button 
-                            class="btn btn-xs btn-ghost"
-                            @click="exportEventLog"
-                            title="Export event log as markdown"
-                        >
-                            Export
-                        </button>
+                        <div class="flex gap-2">
+                            <button 
+                                class="btn btn-xs btn-ghost"
+                                @click="exportEventLog"
+                                title="Export event log as markdown"
+                            >
+                                Export
+                            </button>
+                            <button 
+                                class="btn btn-xs btn-ghost btn-error"
+                                @click="showClearLogModal = true"
+                                title="Clear all events"
+                                :disabled="isExpired || events.length === 0"
+                            >
+                                Clear
+                            </button>
+                        </div>
                     </div>
                     <div class="flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
                         <div 
@@ -484,12 +495,13 @@
                     
                     <!-- Units -->
                     <div class="space-y-2">
-                        <unit-card 
+                        <unit-card
                             v-for="unit in getPlayerUnits(rightPlayer.id)"
                             :key="unit.id"
                             :unit="unit"
                             :is-mine="rightPlayer.id === currentPlayerId"
                             @update="updateUnit"
+                            @open-action-modal="openActionModal"
                         ></unit-card>
                     </div>
                 </div>
@@ -1018,6 +1030,164 @@
         </div>
         <div class="modal-backdrop bg-black/50" @click="showLoadModal = false"></div>
     </dialog>
+    
+    <!-- Unit Action Modal -->
+    <dialog v-if="showActionModal" :open="showActionModal" class="modal modal-open">
+        <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg mb-4">
+                Select Action for 
+                <span v-if="getUnitForAction()">
+                    [[ getUnitForAction().display_name || getUnitForAction().name || 'Unit' ]]
+                </span>
+            </h3>
+            
+            <!-- Action Selection -->
+            <div class="mb-6">
+                <p class="text-sm text-base-content/70 mb-3">Choose an action:</p>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    <button
+                        class="btn btn-sm"
+                        :class="selectedAction === 'rush' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('rush')"
+                        :disabled="isExpired"
+                    >
+                        Rush
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        :class="selectedAction === 'advance' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('advance')"
+                        :disabled="isExpired"
+                    >
+                        Advance
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        :class="selectedAction === 'hold' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('hold')"
+                        :disabled="isExpired"
+                    >
+                        Hold
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        :class="selectedAction === 'charge' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('charge')"
+                        :disabled="isExpired"
+                    >
+                        Charge
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        :class="selectedAction === 'attack' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('attack')"
+                        :disabled="isExpired"
+                    >
+                        Attack
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Target Selection (for Charge/Attack) -->
+            <div v-if="selectedAction === 'charge' || selectedAction === 'attack'" class="mb-6">
+                <p class="text-sm text-base-content/70 mb-3">
+                    Select target unit(s) ([[ selectedTargets.length ]] selected):
+                </p>
+                <div 
+                    v-if="getUnitForAction()"
+                    class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto"
+                >
+                    <div
+                        v-for="targetUnit in getOpposingUnits(getUnitForAction().player_id)"
+                        :key="targetUnit.id"
+                        class="card card-compact bg-base-200 p-3 cursor-pointer transition-all"
+                        :class="selectedTargets.includes(String(targetUnit.id)) ? 'ring-2 ring-primary bg-primary/20' : 'hover:bg-base-300'"
+                        @click="toggleTarget(String(targetUnit.id))"
+                    >
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <div class="font-semibold text-sm">
+                                    [[ targetUnit.display_name || targetUnit.name ]]
+                                    <span v-if="getAttachedHeroesForUnit(targetUnit.id).length > 0">
+                                        <span v-for="(hero, index) in getAttachedHeroesForUnit(targetUnit.id)" :key="hero.id">
+                                            <span v-if="index === 0"> / </span>
+                                            <span v-else>, </span>
+                                            [[ hero.display_name || hero.name ]]
+                                        </span>
+                                    </span>
+                                </div>
+                                <div class="text-xs text-base-content/70 mt-1">
+                                    <span v-if="targetUnit.state">
+                                        W: [[ targetUnit.state.wounds_taken || 0 ]] / [[ targetUnit.size * targetUnit.tough ]]
+                                    </span>
+                                    <span class="ml-2">Q[[ targetUnit.quality ]]+ D[[ targetUnit.defense ]]+</span>
+                                </div>
+                                <div class="flex flex-wrap gap-1 mt-1" v-if="targetUnit.state">
+                                    <span v-if="targetUnit.state.activated_this_round" class="badge badge-xs badge-neutral">Activated</span>
+                                    <span v-if="targetUnit.state.is_shaken" class="badge badge-xs badge-warning">Shaken</span>
+                                    <span v-if="targetUnit.state.is_fatigued" class="badge badge-xs badge-warning">Fatigued</span>
+                                </div>
+                            </div>
+                            <div v-if="selectedTargets.includes(String(targetUnit.id))" class="ml-2">
+                                <span class="text-primary text-lg">✓</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <p v-if="getUnitForAction() && getOpposingUnits(getUnitForAction().player_id).length === 0" class="text-sm text-warning">
+                    No opposing units available to target
+                </p>
+            </div>
+            
+            <div class="modal-action">
+                <button
+                    type="button"
+                    class="btn btn-ghost"
+                    @click="showActionModal = false; selectedAction = null; selectedTargets = []; selectedUnitForAction = null;"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    @click="logUnitAction"
+                    :disabled="isExpired || !selectedAction || ((selectedAction === 'charge' || selectedAction === 'attack') && selectedTargets.length === 0)"
+                >
+                    [[ getActionButtonText() ]]
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showActionModal = false; selectedAction = null; selectedTargets = []; selectedUnitForAction = null;"></div>
+    </dialog>
+    
+    <!-- Clear Log Confirmation Modal -->
+    <dialog v-if="showClearLogModal" :open="showClearLogModal" class="modal modal-open">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">Clear Event Log</h3>
+            <p class="mb-4">
+                Are you sure you want to clear all events from the game log? This action cannot be undone.
+            </p>
+            <div class="modal-action">
+                <button
+                    type="button"
+                    class="btn btn-ghost"
+                    @click="showClearLogModal = false"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-error"
+                    @click="clearEventLog"
+                    :disabled="isExpired || isClearingLog"
+                >
+                    <span v-if="isClearingLog" class="loading loading-spinner loading-xs"></span>
+                    Clear Log
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showClearLogModal = false"></div>
+    </dialog>
 </div>
 
 <!-- Unit Card Component Template -->
@@ -1265,7 +1435,7 @@ document.addEventListener("DOMContentLoaded", () => {
             unit: { type: Object, required: true },
             isMine: { type: Boolean, default: false },
         },
-        emits: ['update'],
+        emits: ['update', 'open-action-modal'],
         setup(props, { emit }) {
             const store = GameStore;
             
@@ -1410,7 +1580,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     alert(`${props.unit.custom_name || props.unit.name} is attached to another unit and cannot be activated separately. Activate the parent unit instead.`);
                     return;
                 }
-                emit('update', props.unit.id, { activated_this_round: !props.unit.state.activated_this_round });
+                // If unit is already activated, toggle it off
+                if (props.unit.state.activated_this_round) {
+                    emit('update', props.unit.id, { activated_this_round: false });
+                } else {
+                    // If not activated, open action modal
+                    emit('open-action-modal', props.unit.id);
+                }
             };
             
             const toggleShaken = () => {
@@ -1543,6 +1719,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 description: '',
             });
             const selectedPlayerForUnits = ref(null);
+            const showActionModal = ref(false);
+            const selectedUnitForAction = ref(null);
+            const selectedAction = ref(null);
+            const selectedTargets = ref([]);
+            const showClearLogModal = ref(false);
+            const isClearingLog = ref(false);
             const manualUnitForm = reactive({
                 name: '',
                 custom_name: '',
@@ -1617,6 +1799,96 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const isMoraleThreshold = (playerId) => {
                 return getArmyHealth(playerId) <= 0.5;
+            };
+            
+            const getOpposingUnits = (unitPlayerId) => {
+                // Get all units from players other than the specified player
+                // Filter out destroyed units and attached units (heroes attached to other units)
+                // Handle both string and UUID comparison
+                const playerIdStr = String(unitPlayerId);
+                return units.value.filter(u => {
+                    const uPlayerIdStr = String(u.player_id);
+                    if (uPlayerIdStr === playerIdStr) return false;
+                    if (!u.state) return false;
+                    if (u.state.deployment_status === 'destroyed') return false;
+                    // Filter out attached units (they should be shown with their parent unit)
+                    if (u.attached_to_unit_id) return false;
+                    return true;
+                });
+            };
+            
+            const getAttachedHeroesForUnit = (unitId) => {
+                // Get all heroes attached to this unit
+                return units.value.filter(u => String(u.attached_to_unit_id) === String(unitId));
+            };
+            
+            const getUnitForAction = () => {
+                if (!selectedUnitForAction.value) return null;
+                return units.value.find(u => String(u.id) === String(selectedUnitForAction.value));
+            };
+            
+            const getActionButtonText = () => {
+                if (!selectedAction.value) return 'Log Action';
+                // Capitalize first letter
+                return selectedAction.value.charAt(0).toUpperCase() + selectedAction.value.slice(1);
+            };
+            
+            const openActionModal = (unitId) => {
+                selectedUnitForAction.value = unitId;
+                selectedAction.value = null;
+                selectedTargets.value = [];
+                showActionModal.value = true;
+            };
+            
+            const selectAction = (action) => {
+                selectedAction.value = action;
+                if (action !== 'charge' && action !== 'attack') {
+                    selectedTargets.value = [];
+                }
+            };
+            
+            const toggleTarget = (targetUnitId) => {
+                const targetIdStr = String(targetUnitId);
+                const index = selectedTargets.value.indexOf(targetIdStr);
+                if (index > -1) {
+                    selectedTargets.value.splice(index, 1);
+                } else {
+                    selectedTargets.value.push(targetIdStr);
+                }
+            };
+            
+            const logUnitAction = async () => {
+                if (!selectedUnitForAction.value || !selectedAction.value) {
+                    alert('Please select an action');
+                    return;
+                }
+                
+                if ((selectedAction.value === 'charge' || selectedAction.value === 'attack') && selectedTargets.value.length === 0) {
+                    alert('Please select at least one target unit');
+                    return;
+                }
+                
+                try {
+                    // Convert target IDs to UUIDs for API
+                    const targetUuids = selectedTargets.value.map(id => id);
+                    await store.actions.logUnitAction(
+                        GAME_CODE,
+                        selectedUnitForAction.value,
+                        selectedAction.value,
+                        targetUuids
+                    );
+                    
+                    // Close modal and reset state
+                    showActionModal.value = false;
+                    selectedUnitForAction.value = null;
+                    selectedAction.value = null;
+                    selectedTargets.value = [];
+                    
+                    // Refresh events
+                    await store.actions.fetchEvents();
+                } catch (error) {
+                    alert('Failed to log action: ' + error.message);
+                }
             };
             
             const getHealthBarClass = (health) => {
@@ -1887,9 +2159,11 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const exportEventLog = async () => {
                 try {
-                    const response = await fetch(`/api/games/${GAME_CODE}/events/export`);
+                    const basePath = getBasePath();
+                    const response = await fetch(`${basePath}/api/games/${GAME_CODE}/events/export`);
                     if (!response.ok) {
-                        throw new Error('Failed to export event log');
+                        const errorData = await response.json().catch(() => ({ detail: 'Failed to export event log' }));
+                        throw new Error(errorData.detail || 'Failed to export event log');
                     }
                     const blob = await response.blob();
                     const url = window.URL.createObjectURL(blob);
@@ -1902,6 +2176,30 @@ document.addEventListener("DOMContentLoaded", () => {
                     document.body.removeChild(a);
                 } catch (error) {
                     alert('Failed to export event log: ' + error.message);
+                }
+            };
+            
+            const clearEventLog = async () => {
+                isClearingLog.value = true;
+                try {
+                    const basePath = getBasePath();
+                    const response = await fetch(`${basePath}/api/games/${GAME_CODE}/events`, {
+                        method: 'DELETE',
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: 'Failed to clear event log' }));
+                        throw new Error(errorData.detail || 'Failed to clear event log');
+                    }
+                    
+                    // Refresh events to show empty log
+                    await store.actions.fetchEvents();
+                    
+                    showClearLogModal.value = false;
+                } catch (error) {
+                    alert('Failed to clear event log: ' + error.message);
+                } finally {
+                    isClearingLog.value = false;
                 }
             };
             
@@ -2341,6 +2639,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 newPlayerName,
                 newPlayerColor,
                 joinError,
+                showActionModal,
+                selectedUnitForAction,
+                selectedAction,
+                selectedTargets,
+                showClearLogModal,
+                isClearingLog,
                 
                 // Computed
                 statusBadgeClass,
@@ -2365,6 +2669,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 formatTime,
                 createNewPlayer,
                 getBasePath,
+                exportEventLog,
+                clearEventLog,
+                getOpposingUnits,
+                getUnitForAction,
+                getAttachedHeroesForUnit,
+                getActionButtonText,
+                openActionModal,
+                selectAction,
+                toggleTarget,
+                logUnitAction,
             };
         },
     };

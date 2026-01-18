@@ -12,10 +12,16 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - **Attached Units**: Heroes attached to parent units are visually grouped and controlled together; single activate button for combined units
 - **Unit Detachment**: Manual detachment of heroes from parent units; automatic detachment when parent is destroyed
 - **Shaken/Unshaken Logging**: All shaken state changes are logged with proper event tracking
+- **Unit Action Logging**: Log unit actions (Rush, Advance, Hold, Charge, Attack) with target selection for Charge/Attack actions
 - Action log: Automatic logging of all game state changes with human-readable descriptions
+- **Event Log Export**: Export game event log as markdown file
+- **Clear Event Log**: Clear all events from a game (with confirmation)
 - **Army Forge Import**: Import units from Army Forge share links (accumulates with existing units)
 - **Manual Unit Entry**: Add units one at a time via form modal
 - **Clear All Units**: Explicit button with confirmation to clear all units (only in lobby)
+- **Solo Play Mode**: Play games solo with an "Opponent" player; game state persistence with save/load
+- **Game Expiration**: Multiplayer games expire after 1 hour of inactivity; solo games expire after 30 days
+- **Automated Migrations**: Database migrations run automatically on application startup
 - Responsive/mobile-friendly UI
 
 ## Architecture
@@ -66,6 +72,7 @@ Quick summary:
 - Nginx reverse proxy (`deploy/nginx.conf`) handles HTTP/WebSocket
 - Automated deploy script (`deploy/deploy.sh`) sets up everything
 - Database initialization script (`deploy/init_db.py`) creates schema
+- **Automated Migrations**: Migrations run automatically on application startup (can be disabled with `AUTO_RUN_MIGRATIONS=false`)
 
 For a 2GB/1vCPU droplet, the service runs 2 uvicorn workers and binds to localhost (nginx handles external traffic).
 
@@ -91,6 +98,12 @@ uv run pytest --cov=app --cov=tests/api --cov-report=term-missing
 ```
 Notes: SQLite via `DATABASE_URL` override in `tests/conftest.py`; ASGITransport runs app in-process; lifecycle via `asgi-lifespan`.
 
+Test coverage includes:
+- Unit action logging (rush, advance, hold, charge, attack)
+- Target selection validation for charge/attack actions
+- Event log export functionality
+- Clear events functionality
+
 ### End-to-End (Playwright)
 Requires server at `http://localhost:8000`.
 ```bash
@@ -100,18 +113,24 @@ npm run test:e2e:headed # headed/debug
 Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal dismissal, army import sync (host sees units). Skips on CI by default.
 
 ## Key Endpoints
-- `POST /api/games` – create game (game_system optional, defaults to GFF)
+- `POST /api/games` – create game (game_system optional, defaults to GFF; `is_solo` optional for solo play mode)
 - `POST /api/games/{code}/join` – join game
 - `POST /api/games/{code}/start` – start game
 - `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`) - **adds units** (does not clear existing)
 - `POST /api/games/{code}/units/manual` – create unit manually (`CreateUnitRequest`)
+- `POST /api/games/{code}/units/{unit_id}/actions` – log unit action (`action`: rush/advance/hold/charge/attack, `target_unit_ids` optional for charge/attack)
 - `DELETE /api/games/{code}/players/{player_id}/units` – clear all units for a player (lobby only)
+- `DELETE /api/games/{code}/events` – clear all events for a game
 - `GET /api/games/{code}` – fetch game state (players, units, events)
 - `GET /api/games/{code}/events` – fetch game event log
+- `GET /api/games/{code}/events/export` – export game events as markdown file
 - `PATCH /api/games/{code}/players/{player_id}/victory-points` – update VP (`delta: int`)
 - `PATCH /api/games/{code}/round` – update round (`delta: int`)
 - `PATCH /api/games/{code}/units/{unit_id}` – update unit state (wounds, activation, etc.)
 - `PATCH /api/games/{code}/units/{unit_id}/detach` – manually detach a hero from its parent unit
+- `POST /api/games/{code}/save` – save game state (solo mode)
+- `GET /api/games/{code}/saves` – list saved game states
+- `POST /api/games/{code}/load` – load a saved game state
 - `GET /ws/game/{code}` – WebSocket (messages: `state`, `state_update`, `player_joined`, `player_left`, `error`)
 
 ## Frontend State / Identity
@@ -122,6 +141,30 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - **Army Forge Import**: Imports units from Army Forge share links. Units are **added** to existing units (does not clear existing units). Multiple imports accumulate.
 - **Manual Unit Entry**: Add units one at a time via the "Add Unit Manually" button in the lobby. Units accumulate with imported units.
 - **Clear All Units**: Use the "Clear All Units" button (only visible when player has units) to remove all units. Requires confirmation modal. Only available in lobby status. Resets player stats (unit count, points, army name).
+
+## Unit Actions
+- **Action Logging**: When activating a unit, select an action (Rush, Advance, Hold, Charge, or Attack)
+- **Target Selection**: For Charge and Attack actions, select one or more opposing units as targets
+- **Action Events**: All actions are logged in the event log with descriptions like "Unit charged Target Unit" or "Unit advanced"
+- **Attached Units**: When a unit with attached heroes performs an action, the heroes are automatically activated but don't get separate action logs
+
+## Event Log Management
+- **Event Log**: All game state changes are automatically logged with human-readable descriptions
+- **Export Log**: Export the entire event log as a markdown file for record-keeping
+- **Clear Log**: Clear all events from a game (requires confirmation). Useful for resetting the log mid-game.
+
+## Solo Play Mode
+- **Solo Games**: Create games with `is_solo: true` to play against yourself
+- **Opponent Player**: Solo games automatically create an "Opponent" player that you can control
+- **Save/Load**: Save game states at any point and load them later to resume play
+- **No WebSockets**: Solo games don't use WebSockets for real-time sync (uses polling instead)
+- **Game Persistence**: Solo games persist for 30 days of inactivity before expiring
+
+## Game Expiration
+- **Multiplayer Games**: Expire after 1 hour of no connected users or activity
+- **Solo Games**: Expire after 30 days of no activity
+- **Expired Games**: When accessed, all buttons are disabled and a modal indicates expiration
+- **Log Retention**: Event logs remain available for 24 hours after expiration
 
 ## Troubleshooting
 - WebSockets: if stale, hard-refresh; check console for “WebSocket connected.”
