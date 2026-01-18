@@ -155,7 +155,7 @@
         <main class="flex-1 overflow-hidden flex game-layout">
             
             <!-- Left Column (local player if present) -->
-            <div class="player-column flex-1 p-4 overflow-y-auto border-r border-base-200 md:border-r">
+            <div class="player-column flex-1 p-4 overflow-y-auto border-r border-base-200 md:border-r" :class="{ 'opacity-50 pointer-events-none': isExpired }">
                 <div v-if="leftPlayer" class="mb-4">
                     <!-- Player Header -->
                     <div class="flex items-center gap-2 mb-2">
@@ -211,7 +211,7 @@
                             <button 
                                 class="btn btn-xs btn-circle btn-ghost"
                                 @click="updateVP(leftPlayer.id, -1)"
-                                :disabled="leftPlayer.victory_points <= 0"
+                                :disabled="isExpired || leftPlayer.victory_points <= 0"
                             >
                                 -
                             </button>
@@ -219,6 +219,7 @@
                             <button 
                                 class="btn btn-xs btn-circle btn-ghost"
                                 @click="updateVP(leftPlayer.id, 1)"
+                                :disabled="isExpired"
                             >
                                 +
                             </button>
@@ -228,7 +229,7 @@
                             <button 
                                 class="btn btn-xs btn-circle btn-ghost"
                                 @click="updateVP(rightPlayer.id, -1)"
-                                :disabled="rightPlayer.victory_points <= 0"
+                                :disabled="isExpired || rightPlayer.victory_points <= 0"
                             >
                                 -
                             </button>
@@ -236,10 +237,59 @@
                             <button 
                                 class="btn btn-xs btn-circle btn-ghost"
                                 @click="updateVP(rightPlayer.id, 1)"
+                                :disabled="isExpired"
                             >
                                 +
                             </button>
                         </div>
+                    </div>
+                </div>
+                
+                <!-- Solo Mode Indicator -->
+                <div v-if="game.is_solo" class="p-4 border-b border-base-300 bg-warning/10">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="badge badge-warning">Solo Mode</span>
+                            <span class="text-xs text-base-content/70">Controlling both armies</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Player Switcher (Solo Mode Only) -->
+                <div v-if="game.is_solo && (game.status === 'lobby' || game.status === 'in_progress') && players.length > 1" class="p-4 border-b border-base-300">
+                    <h3 class="font-bold mb-2">Control Player</h3>
+                    <div class="space-y-2">
+                        <button
+                            v-for="player in players"
+                            :key="player.id"
+                            class="btn btn-sm btn-block"
+                            :class="currentPlayerId === player.id ? 'btn-primary' : 'btn-outline'"
+                            @click="switchPlayer(player.id)"
+                            :disabled="isExpired"
+                        >
+                            [[ player.name ]]
+                            <span v-if="currentPlayerId === player.id" class="badge badge-sm ml-2">Active</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Save/Load Controls (Solo Mode Only) -->
+                <div v-if="game.is_solo" class="p-4 border-b border-base-300">
+                    <h3 class="font-bold mb-2">Save/Load</h3>
+                    <div class="space-y-2">
+                        <button
+                            class="btn btn-sm btn-block btn-outline"
+                            @click="showSaveModal = true"
+                        >
+                            Save Game
+                        </button>
+                        <button
+                            class="btn btn-sm btn-block btn-outline"
+                            @click="showLoadModal = true"
+                            :disabled="isExpired"
+                        >
+                            Load Game
+                        </button>
                     </div>
                 </div>
                 
@@ -250,7 +300,7 @@
                         <button 
                             class="btn btn-xs btn-circle btn-ghost"
                             @click="updateRound(-1)"
-                            :disabled="game.current_round <= 1"
+                            :disabled="isExpired || game.current_round <= 1"
                         >
                             -
                         </button>
@@ -258,6 +308,7 @@
                         <button 
                             class="btn btn-xs btn-circle btn-ghost"
                             @click="updateRound(1)"
+                            :disabled="isExpired"
                         >
                             +
                         </button>
@@ -270,7 +321,7 @@
                     <div class="space-y-2">
                         <button 
                             class="btn btn-sm btn-block"
-                            :disabled="game.current_round >= game.max_rounds"
+                            :disabled="isExpired || game.current_round >= game.max_rounds"
                             @click="advanceRound"
                         >
                             End Round → Round [[ game.current_round + 1 ]]
@@ -289,6 +340,25 @@
                 <div class="p-4 border-b border-base-300" v-if="game.status === 'lobby'">
                     <h3 class="font-bold mb-2">Game Setup</h3>
                     
+                    <!-- Player Selector (Solo Mode Only) -->
+                    <div v-if="game.is_solo && players.length > 1" class="form-control mb-2">
+                        <label class="label">
+                            <span class="label-text">Add Units To</span>
+                        </label>
+                        <select 
+                            v-model="selectedPlayerForUnits"
+                            class="select select-sm select-bordered w-full"
+                        >
+                            <option 
+                                v-for="player in players"
+                                :key="player.id"
+                                :value="player.id"
+                            >
+                                [[ player.name ]]
+                            </option>
+                        </select>
+                    </div>
+                    
                     <!-- Army Import -->
                     <div class="form-control mb-2">
                         <label class="label label-text">Army Forge URL</label>
@@ -304,6 +374,7 @@
                         :disabled="!armyForgeUrl || isImporting"
                         :class="{ 'loading': isImporting }"
                         @click="importArmy"
+                        :disabled="isExpired"
                     >
                         Import Army
                     </button>
@@ -313,6 +384,7 @@
                     <button 
                         class="btn btn-sm btn-block btn-outline mb-2"
                         @click="showManualUnitModal = true"
+                        :disabled="isExpired"
                     >
                         Add Unit Manually
                     </button>
@@ -321,6 +393,7 @@
                         v-if="currentPlayerId && getPlayerUnits(currentPlayerId).length > 0"
                         class="btn btn-sm btn-block btn-error btn-outline mb-2"
                         @click="showClearUnitsModal = true"
+                        :disabled="isExpired"
                     >
                         Clear All Units
                     </button>
@@ -329,23 +402,34 @@
                     
                     <button 
                         class="btn btn-sm btn-block btn-primary"
-                        :disabled="players.length < 2 || !hasUnits"
+                        :disabled="isExpired || (!game.is_solo && players.length < 2) || !hasUnits"
                         @click="startGame"
                     >
                         Start Game
                     </button>
-                    <p v-if="players.length < 2" class="text-xs text-center mt-1 text-warning">
+                    <p v-if="!game.is_solo && players.length < 2" class="text-xs text-center mt-1 text-warning">
                         Waiting for opponent...
                     </p>
+                    <p v-else-if="game.is_solo && players.length === 0" class="text-xs text-center mt-1 text-warning">
+                        Add at least one player with units
+                    </p>
                     <p v-else-if="!hasUnits" class="text-xs text-center mt-1 text-warning">
-                        Both players need armies
+                        <span v-if="game.is_solo">Add units to start</span>
+                        <span v-else>Both players need armies</span>
                     </p>
                 </div>
                 
                 <!-- Game Log -->
                 <div class="game-log flex-1 overflow-hidden flex flex-col">
-                    <div class="p-2 border-b border-base-300">
+                    <div class="p-2 border-b border-base-300 flex justify-between items-center">
                         <h3 class="font-bold text-sm">Game Log</h3>
+                        <button 
+                            class="btn btn-xs btn-ghost"
+                            @click="exportEventLog"
+                            title="Export event log as markdown"
+                        >
+                            Export
+                        </button>
                     </div>
                     <div class="flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
                         <div 
@@ -367,7 +451,7 @@
             </div>
             
             <!-- Right Column (opponent if present) -->
-            <div class="player-column flex-1 p-4 overflow-y-auto border-l border-base-200">
+            <div class="player-column flex-1 p-4 overflow-y-auto border-l border-base-200" :class="{ 'opacity-50 pointer-events-none': isExpired }">
                 <div v-if="rightPlayer" class="mb-4">
                     <!-- Player Header -->
                     <div class="flex items-center gap-2 mb-2">
@@ -781,6 +865,7 @@
                         :disabled="isClearingUnits"
                         :class="{ 'loading': isClearingUnits }"
                         @click="confirmClearUnits"
+                        :disabled="isExpired"
                     >
                         Clear All Units
                     </button>
@@ -788,6 +873,150 @@
             </div>
         </div>
         <div class="modal-backdrop bg-black/50" @click="showClearUnitsModal = false"></div>
+    </dialog>
+    
+    <!-- Expired Game Modal -->
+    <dialog v-if="showExpiredModal" :open="showExpiredModal" class="modal modal-open">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">Game Expired</h3>
+            <p class="mb-4">
+                <span v-if="game?.is_solo">
+                    This game has expired due to inactivity (no activity for 30 days). All game actions are disabled.
+                </span>
+                <span v-else>
+                    This game has expired due to inactivity (no connected users for 1 hour). All game actions are disabled.
+                </span>
+            </p>
+            <p class="text-sm text-base-content/70 mb-4">
+                Event logs will remain available for 24 hours for review.
+            </p>
+            <div class="modal-action">
+                <button 
+                    type="button"
+                    class="btn btn-primary"
+                    @click="exportEventLog"
+                >
+                    Export Event Log
+                </button>
+                <button 
+                    type="button"
+                    class="btn btn-ghost"
+                    @click="showExpiredModal = false"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showExpiredModal = false"></div>
+    </dialog>
+    
+    <!-- Save Game Modal -->
+    <dialog v-if="showSaveModal" :open="showSaveModal" class="modal modal-open">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg mb-4">Save Game</h3>
+            
+            <form @submit.prevent="saveGame" class="space-y-4">
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Save Name</span>
+                    </label>
+                    <input
+                        type="text"
+                        v-model="saveForm.saveName"
+                        placeholder="My Save"
+                        class="input input-bordered"
+                        required
+                    />
+                </div>
+                
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Description (optional)</span>
+                    </label>
+                    <textarea
+                        v-model="saveForm.description"
+                        placeholder="Round 2, turn 3..."
+                        class="textarea textarea-bordered"
+                        rows="3"
+                    ></textarea>
+                </div>
+                
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        class="btn btn-ghost"
+                        @click="showSaveModal = false"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :disabled="isSaving || !saveForm.saveName"
+                        :class="{ 'loading': isSaving }"
+                    >
+                        Save
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showSaveModal = false"></div>
+    </dialog>
+    
+    <!-- Load Game Modal -->
+    <dialog v-if="showLoadModal" :open="showLoadModal" class="modal modal-open">
+        <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg mb-4">Load Game</h3>
+            
+            <div v-if="isLoadingSaves" class="text-center py-8">
+                <span class="loading loading-spinner loading-lg"></span>
+                <p class="mt-4">Loading saves...</p>
+            </div>
+            
+            <div v-else-if="gameSaves.length === 0" class="text-center py-8">
+                <p class="text-base-content/70">No saved games found</p>
+            </div>
+            
+            <div v-else class="space-y-2 max-h-96 overflow-y-auto">
+                <div
+                    v-for="save in gameSaves"
+                    :key="save.id"
+                    class="card bg-base-200 p-4 cursor-pointer hover:bg-base-300 transition-colors"
+                    @click="loadGame(save.id)"
+                >
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h4 class="font-bold">[[ save.save_name ]]</h4>
+                            <p v-if="save.description" class="text-sm text-base-content/70 mt-1">
+                                [[ save.description ]]
+                            </p>
+                            <p class="text-xs text-base-content/50 mt-1">
+                                Saved: [[ formatDate(save.saved_at) ]]
+                            </p>
+                        </div>
+                        <button
+                            class="btn btn-sm btn-primary"
+                            :disabled="isLoadingGame"
+                            :class="{ 'loading': isLoadingGame }"
+                            @click.stop="loadGame(save.id)"
+                        >
+                            Load
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-action mt-4">
+                <button
+                    type="button"
+                    class="btn btn-ghost"
+                    @click="showLoadModal = false"
+                >
+                    Close
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="showLoadModal = false"></div>
     </dialog>
 </div>
 
@@ -1302,6 +1531,18 @@ document.addEventListener("DOMContentLoaded", () => {
             const isCreatingUnit = ref(false);
             const showClearUnitsModal = ref(false);
             const isClearingUnits = ref(false);
+            const showSaveModal = ref(false);
+            const showLoadModal = ref(false);
+            const isSaving = ref(false);
+            const isLoadingGame = ref(false);
+            const isLoadingSaves = ref(false);
+            const gameSaves = ref([]);
+            const showExpiredModal = ref(false);
+            const saveForm = reactive({
+                saveName: '',
+                description: '',
+            });
+            const selectedPlayerForUnits = ref(null);
             const manualUnitForm = reactive({
                 name: '',
                 custom_name: '',
@@ -1343,6 +1584,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 return players.value.every(p => 
                     units.value.some(u => u.player_id === p.id)
                 );
+            });
+            
+            const isExpired = computed(() => {
+                return game.value?.status === 'expired';
             });
             
             // Methods
@@ -1509,10 +1754,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 
                 isImporting.value = true;
                 try {
-                    await store.actions.importArmy(GAME_CODE, url);
+                    // In solo mode, use selected player; otherwise use currentPlayerId
+                    const playerId = game.value?.is_solo && selectedPlayerForUnits.value 
+                        ? selectedPlayerForUnits.value 
+                        : currentPlayerId.value;
+                    
+                    if (!playerId) {
+                        alert('No player selected. Please select a player first.');
+                        return;
+                    }
+                    
+                    await store.actions.importArmy(GAME_CODE, url, playerId);
                     armyForgeUrl.value = '';
                 } catch (error) {
-                    alert('Failed to import: ' + error.message);
+                    console.error('Army import error:', error);
+                    // Show error message - handle multi-line messages
+                    const errorMsg = error.message || 'Unknown error occurred';
+                    alert(errorMsg);
                 } finally {
                     isImporting.value = false;
                 }
@@ -1571,7 +1829,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         attached_to_unit_id: manualUnitForm.attached_to_unit_id || null,
                     };
                     
-                    await store.actions.createUnitManually(GAME_CODE, unitData);
+                    // In solo mode, use selected player; otherwise use currentPlayerId
+                    const playerId = game.value?.is_solo && selectedPlayerForUnits.value 
+                        ? selectedPlayerForUnits.value 
+                        : currentPlayerId.value;
+                    
+                    await store.actions.createUnitManually(GAME_CODE, unitData, playerId);
                     
                     // Reset form
                     manualUnitForm.name = '';
@@ -1618,10 +1881,125 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             };
             
+            const switchPlayer = (playerId) => {
+                store.actions.switchPlayer(playerId);
+            };
+            
+            const exportEventLog = async () => {
+                try {
+                    const response = await fetch(`/api/games/${GAME_CODE}/events/export`);
+                    if (!response.ok) {
+                        throw new Error('Failed to export event log');
+                    }
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `game-${GAME_CODE}-events.md`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } catch (error) {
+                    alert('Failed to export event log: ' + error.message);
+                }
+            };
+            
+            const saveGame = async () => {
+                if (!saveForm.saveName.trim()) {
+                    alert('Please enter a save name');
+                    return;
+                }
+                
+                isSaving.value = true;
+                try {
+                    await store.actions.saveGame(
+                        GAME_CODE,
+                        saveForm.saveName.trim(),
+                        saveForm.description.trim() || null
+                    );
+                    showSaveModal.value = false;
+                    saveForm.saveName = '';
+                    saveForm.description = '';
+                    alert('Game saved successfully!');
+                } catch (error) {
+                    alert('Failed to save game: ' + error.message);
+                } finally {
+                    isSaving.value = false;
+                }
+            };
+            
+            const loadGame = async (saveId) => {
+                isLoadingGame.value = true;
+                try {
+                    await store.actions.loadGame(GAME_CODE, saveId);
+                    showLoadModal.value = false;
+                    await store.actions.fetchGame(GAME_CODE);
+                    alert('Game loaded successfully!');
+                } catch (error) {
+                    alert('Failed to load game: ' + error.message);
+                } finally {
+                    isLoadingGame.value = false;
+                }
+            };
+            
+            const loadSavesList = async () => {
+                if (!showLoadModal.value) return;
+                
+                isLoadingSaves.value = true;
+                try {
+                    gameSaves.value = await store.actions.listSaves(GAME_CODE);
+                } catch (error) {
+                    alert('Failed to load saves: ' + error.message);
+                } finally {
+                    isLoadingSaves.value = false;
+                }
+            };
+            
+            const formatDate = (dateString) => {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                return date.toLocaleString();
+            };
+            
+            // Watch for load modal opening to fetch saves
+            watch(
+                showLoadModal,
+                (isOpen) => {
+                    if (isOpen) {
+                        loadSavesList();
+                    }
+                }
+            );
+            
+            // Watch currentPlayerId to sync selectedPlayerForUnits in solo mode
+            watch(
+                () => currentPlayerId.value,
+                (newId) => {
+                    if (game.value?.is_solo && newId) {
+                        selectedPlayerForUnits.value = newId;
+                    }
+                }
+            );
+            
+            // Initialize selectedPlayerForUnits when players are available
+            watch(
+                () => [players.value, game.value?.is_solo],
+                ([playersList, isSolo]) => {
+                    if (isSolo && playersList && playersList.length > 0) {
+                        if (!selectedPlayerForUnits.value || !playersList.find(p => p.id === selectedPlayerForUnits.value)) {
+                            selectedPlayerForUnits.value = currentPlayerId.value || playersList[0].id;
+                        }
+                    }
+                },
+                { immediate: true }
+            );
+            
             const createObjectives = async () => {
                 try {
                     await store.actions.createObjectives(objectiveCount.value);
                     await store.actions.fetchGame(GAME_CODE);
+                    await store.actions.fetchEvents();
                 } catch (error) {
                     alert('Failed to create objectives: ' + error.message);
                 }
@@ -1634,6 +2012,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const advanceRound = async () => {
                 if (confirm('End current round and advance to the next?')) {
                     await store.actions.advanceRound();
+                    // Fetch events for solo mode compatibility
+                    await store.actions.fetchEvents();
                 }
             };
             
@@ -1668,8 +2048,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 store.actions.savePlayerIdentity(GAME_CODE, player.id, player.name);
                 showPlayerSelect.value = false;
                 
-                // Connect WebSocket with selected identity
-                store.actions.connectWebSocket(GAME_CODE);
+                // Connect WebSocket with selected identity (skip for solo mode)
+                if (!store.state.game?.is_solo) {
+                    store.actions.connectWebSocket(GAME_CODE);
+                }
             };
             
             const createNewPlayer = async () => {
@@ -1701,8 +2083,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     availablePlayers.value = [];
                     resetJoinState();
                     
-                    // Connect WebSocket
-                    store.actions.connectWebSocket(GAME_CODE);
+                    // Connect WebSocket (skip for solo mode)
+                    if (!store.state.game?.is_solo) {
+                        store.actions.connectWebSocket(GAME_CODE);
+                    }
                 } catch (err) {
                     joinError.value = err.message || 'Failed to join game.';
                 }
@@ -1724,6 +2108,22 @@ document.addEventListener("DOMContentLoaded", () => {
                 await store.actions.fetchGame(GAME_CODE);
                 await store.actions.fetchEvents();
                 
+                // Check if game is expired and show modal
+                if (store.state.game?.status === 'expired') {
+                    showExpiredModal.value = true;
+                }
+                
+                // Set up automatic event polling for solo games
+                let eventPollInterval = null;
+                if (store.state.game?.is_solo) {
+                    eventPollInterval = setInterval(async () => {
+                        await store.actions.fetchEvents();
+                    }, 2000); // Poll every 2 seconds
+                    
+                    // Store interval ID for cleanup
+                    window.eventPollInterval = eventPollInterval;
+                }
+                
                 const playersList = (store.state.players || []).map(p => ({
                     ...p,
                     id: String(p.id),
@@ -1741,7 +2141,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         allowNewPlayer.value = false;
                         store.state.currentPlayerId = existing.id;
                         store.actions.savePlayerIdentity(GAME_CODE, existing.id, existing.name);
-                        store.actions.connectWebSocket(GAME_CODE);
+                        // Only connect WebSocket if not solo mode
+                        if (!store.state.game?.is_solo) {
+                            store.actions.connectWebSocket(GAME_CODE);
+                        }
                         return;
                     } else {
                         store.state.currentPlayerId = null;
@@ -1755,7 +2158,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         store.state.currentPlayerId = queryPlayerId;
                         store.actions.savePlayerIdentity(GAME_CODE, queryPlayerId, playerFromQuery.name);
                         showPlayerSelect.value = false;
-                        store.actions.connectWebSocket(GAME_CODE);
+                        // Only connect WebSocket if not solo mode
+                        if (!store.state.game?.is_solo) {
+                            store.actions.connectWebSocket(GAME_CODE);
+                        }
                         return;
                     }
                 }
@@ -1768,7 +2174,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         if (player) {
                             store.state.currentPlayerId = savedIdentity.playerId;
                             Debug.log('Restored player identity:', player.name);
+                            // Only connect WebSocket if not solo mode
+                        if (!store.state.game?.is_solo) {
                             store.actions.connectWebSocket(GAME_CODE);
+                        }
                             return;
                         } else {
                             store.actions.clearPlayerIdentity(GAME_CODE);
@@ -1785,7 +2194,10 @@ document.addEventListener("DOMContentLoaded", () => {
                             store.state.currentPlayerId = sessionPlayerId;
                             // Save to localStorage for future
                             store.actions.savePlayerIdentity(GAME_CODE, sessionPlayerId, player.name);
+                            // Only connect WebSocket if not solo mode
+                        if (!store.state.game?.is_solo) {
                             store.actions.connectWebSocket(GAME_CODE);
+                        }
                             return;
                         }
                     }
@@ -1829,7 +2241,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     showPlayerSelect.value = false;
                     allowNewPlayer.value = false;
                     joinError.value = '';
-                    store.actions.connectWebSocket(GAME_CODE);
+                    // Only connect WebSocket if not solo mode
+                    if (!store.state.game?.is_solo) {
+                        store.actions.connectWebSocket(GAME_CODE);
+                    }
                     return;
                 }
                 
@@ -1878,6 +2293,11 @@ document.addEventListener("DOMContentLoaded", () => {
             
             onUnmounted(() => {
                 store.actions.disconnectWebSocket();
+                // Clear event polling interval if it exists
+                if (window.eventPollInterval) {
+                    clearInterval(window.eventPollInterval);
+                    window.eventPollInterval = null;
+                }
             });
             
             return {
@@ -1891,6 +2311,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 isConnected,
                 error,
                 currentPlayerId,
+                isExpired,
+                showExpiredModal,
                 leftPlayer,
                 rightPlayer,
                 armyForgeUrl,
@@ -1901,6 +2323,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 showClearUnitsModal,
                 isClearingUnits,
                 confirmClearUnits,
+                showSaveModal,
+                showLoadModal,
+                isSaving,
+                isLoadingGame,
+                isLoadingSaves,
+                gameSaves,
+                saveForm,
+                switchPlayer,
+                saveGame,
+                loadGame,
+                formatDate,
+                selectedPlayerForUnits,
                 showPlayerSelect,
                 availablePlayers,
                 allowNewPlayer,

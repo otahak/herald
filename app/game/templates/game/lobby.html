@@ -104,6 +104,22 @@
                 </div>
             </div>
             
+            <div class="form-control">
+                <label class="label cursor-pointer justify-start gap-3">
+                    <input 
+                        type="checkbox" 
+                        v-model="createForm.isSolo"
+                        class="checkbox checkbox-primary"
+                    />
+                    <span class="label-text">
+                        <strong>Solo Play Mode</strong>
+                        <span class="block text-xs text-base-content/70 mt-1">
+                            Control both armies for practice/testing
+                        </span>
+                    </span>
+                </label>
+            </div>
+            
             <div class="card-actions justify-end mt-4">
                 <button 
                     class="btn btn-primary btn-block sm:btn-wide sm:btn-auto"
@@ -240,6 +256,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     gameName: '',
                     playerName: '',
                     playerColor: '#3b82f6',
+                    isSolo: false,
                 },
                 
                 joinForm: {
@@ -287,11 +304,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     const code = await GameStore.actions.createGame(
                         this.createForm.gameName || 'New Game',
                         this.createForm.playerName,
-                        this.createForm.playerColor
+                        this.createForm.playerColor,
+                        this.createForm.isSolo
                     );
-                    
-                    this.gameCode = code;
-                    this.showCodeModal = true;
                     
                     // Save player identity to localStorage (persistent)
                     GameStore.actions.savePlayerIdentity(
@@ -304,8 +319,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     sessionStorage.setItem('herald_player_id', GameStore.state.currentPlayerId);
                     sessionStorage.setItem('herald_game_code', code);
                     
-                    // Connect WebSocket to listen for opponent joining
-                    GameStore.actions.connectWebSocket(code);
+                    // Solo mode: skip modal and go directly to game board
+                    if (this.createForm.isSolo) {
+                        this.gameCode = code;
+                        this.goToGame();
+                    } else {
+                        // Multiplayer: show modal and connect WebSocket
+                        this.gameCode = code;
+                        this.showCodeModal = true;
+                        GameStore.actions.connectWebSocket(code);
+                    }
                     
                 } catch (error) {
                     this.error = error.message;

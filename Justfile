@@ -47,3 +47,34 @@ psql:
 test py_args="" e2e_args="":
 	uv run pytest tests/api {{py_args}}
 	if [ "${E2E:-1}" -eq 1 ]; then npm run test:e2e -- {{e2e_args}}; fi
+
+# Run a specific migration
+# Usage:
+#   just migrate migrate_add_solo_mode.py
+#   Runs inside Docker container if Docker is running, otherwise on host
+migrate migration_file:
+	@if docker compose ps db 2>/dev/null | grep -q "Up"; then \
+		echo "Running migration inside Docker container..."; \
+		docker compose exec web uv run python deploy/{{migration_file}}; \
+	else \
+		echo "Running migration on host (make sure database is accessible)..."; \
+		uv run python deploy/{{migration_file}}; \
+	fi
+
+# Run all migrations (WARNING: resets database - drops and recreates!)
+# Only works inside Docker container
+migrate-all:
+	docker compose exec web uv run python deploy/run_migrations.py
+
+# Cleanup expired games (deletes expired games older than 24 hours)
+# Usage:
+#   just cleanup-games
+#   Runs inside Docker container if Docker is running, otherwise on host
+cleanup-games:
+	@if docker compose ps db 2>/dev/null | grep -q "Up"; then \
+		echo "Running cleanup inside Docker container..."; \
+		docker compose exec web uv run python deploy/cleanup_expired_games.py; \
+	else \
+		echo "Running cleanup on host (make sure database is accessible)..."; \
+		uv run python deploy/cleanup_expired_games.py; \
+	fi

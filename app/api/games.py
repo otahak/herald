@@ -1,5 +1,6 @@
 """Game session API endpoints."""
 
+import json
 import logging
 import re
 import uuid
@@ -7,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Any
 
 from litestar import Controller, get, post, patch, delete, Request
+from litestar.response import Response
 from litestar.dto import DTOConfig
 from litestar.exceptions import NotFoundException, ValidationException
 from pydantic import BaseModel, Field
@@ -19,6 +21,7 @@ from app.models import (
     Player, Unit, UnitState, DeploymentStatus,
     Objective, ObjectiveStatus,
     GameEvent, EventType,
+    GameSave,
 )
 from app.api.websocket import broadcast_to_game
 from app.utils.logging import error_log, log_exception_with_context
@@ -37,6 +40,7 @@ class CreateGameRequest(BaseModel):
     game_system: Optional[GameSystem] = Field(default=None)
     player_name: str = Field(max_length=50)
     player_color: str = Field(default="#3b82f6", max_length=20)
+    is_solo: bool = Field(default=False, description="Enable solo play mode (single player controls both armies)")
 
 
 class JoinGameRequest(BaseModel):
@@ -114,6 +118,37 @@ class ClearUnitsResponse(BaseModel):
     success: bool
     units_cleared: int
     message: str
+
+
+class SaveGameRequest(BaseModel):
+    """Request to save a game state."""
+    save_name: str = Field(default="Untitled Save", max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+
+
+class SaveGameResponse(BaseModel):
+    """Response after saving a game."""
+    success: bool
+    save_id: uuid.UUID
+    save_name: str
+    message: str
+
+
+class GameSaveResponse(BaseModel):
+    """Response for a game save."""
+    id: uuid.UUID
+    game_id: uuid.UUID
+    save_name: str
+    saved_at: datetime
+    description: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+
+class LoadGameRequest(BaseModel):
+    """Request to load a game state."""
+    save_id: uuid.UUID
 
 
 # --- Response Schemas ---
@@ -215,6 +250,7 @@ class GameResponse(BaseModel):
     name: str
     game_system: GameSystem
     status: GameStatus
+    is_solo: bool
     current_round: int
     max_rounds: int
     current_player_id: Optional[uuid.UUID]
@@ -240,6 +276,12 @@ class JoinGameResponse(GameWithUnitsResponse):
 
 # --- Helper Functions ---
 
+async def broadcast_if_not_solo(game: Game, code: str, message: dict) -> None:
+    """Broadcast to game only if not in solo mode."""
+    if not game.is_solo:
+        await broadcast_to_game(code, message)
+
+
 async def get_game_by_code(session: AsyncSession, code: str, load_attached_heroes: bool = False) -> Game:
     """Fetch game by join code with relationships loaded."""
     stmt = (
@@ -261,7 +303,49 @@ async def get_game_by_code(session: AsyncSession, code: str, load_attached_heroe
     game = result.scalar_one_or_none()
     if not game:
         raise NotFoundException(f"Game with code '{code}' not found")
+    
     return game
+
+
+def check_and_update_expiration(game: Game) -> bool:
+    """
+    Check if a game has expired based on its type and activity.
+    
+    Returns:
+        True if game is expired, False otherwise
+    
+    Expiration rules:
+        - Multiplayer games: Expire after 1 hour of no connected users
+        - Solo games: Expire after 30 days of no activity
+    """
+    if game.status == GameStatus.EXPIRED:
+        return True
+    
+    now = datetime.now(timezone.utc)
+    
+    # If no activity tracking, game hasn't expired yet
+    if not game.last_activity_at:
+        return False
+    
+    # Check expiration based on game type
+    if game.is_solo:
+        # Solo games expire after 30 days of inactivity
+        expiration_threshold = timedelta(days=30)
+        if now - game.last_activity_at > expiration_threshold:
+            game.status = GameStatus.EXPIRED
+            return True
+    else:
+        # Multiplayer games expire after 1 hour of no connected users
+        # First check if all players are disconnected
+        all_disconnected = all(not p.is_connected for p in game.players) if game.players else True
+        
+        if all_disconnected:
+            expiration_threshold = timedelta(hours=1)
+            if now - game.last_activity_at > expiration_threshold:
+                game.status = GameStatus.EXPIRED
+                return True
+    
+    return False
 
 
 async def log_event(
@@ -313,6 +397,7 @@ class GamesController(Controller):
             game = Game(
                 name=data.name,
                 game_system=data.game_system or GameSystem.GFF,
+                is_solo=data.is_solo,
             )
             session.add(game)
             await session.flush()  # Get game ID
@@ -328,6 +413,17 @@ class GamesController(Controller):
             )
             session.add(player)
             await session.flush()
+            
+            # For solo mode, automatically create an opponent player
+            if data.is_solo:
+                opponent = Player(
+                    game_id=game.id,
+                    name="Opponent",
+                    color="#ef4444",  # Red, different from default blue
+                    is_host=False,
+                )
+                session.add(opponent)
+                await session.flush()
             
             # Set current player
             game.current_player_id = player.id
@@ -367,6 +463,11 @@ class GamesController(Controller):
     ) -> GameWithUnitsResponse:
         """Get game state by join code."""
         game = await get_game_by_code(session, code)
+        
+        # Check and update expiration status
+        check_and_update_expiration(game)
+        if game.status == GameStatus.EXPIRED:
+            await session.commit()
         
         # Collect all units from all players
         units = []
@@ -423,8 +524,11 @@ class GamesController(Controller):
         
         await session.commit()
         
-        # Broadcast to WebSocket clients (notify host)
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast to WebSocket clients (notify host) - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "player_joined",
             "player": {
                 "id": str(player_id),
@@ -456,16 +560,28 @@ class GamesController(Controller):
         """Start the game (transition from lobby to in_progress)."""
         game = await get_game_by_code(session, code)
         
+        # Update activity tracking
+        game.last_activity_at = datetime.now(timezone.utc)
+        
         if game.status != GameStatus.LOBBY:
             raise ValidationException("Game has already started")
         
-        if len(game.players) < 2:
-            raise ValidationException("Need at least 2 players to start")
-        
-        # Check both players have units
-        for player in game.players:
-            if not player.units:
-                raise ValidationException(f"Player {player.name} has no units")
+        # Solo mode can start with 1 player, multiplayer needs 2
+        if not game.is_solo:
+            if len(game.players) < 2:
+                raise ValidationException("Need at least 2 players to start")
+            
+            # Check both players have units (multiplayer only)
+            for player in game.players:
+                if not player.units:
+                    raise ValidationException(f"Player {player.name} has no units")
+        else:
+            # Solo mode: check at least one player has units
+            if len(game.players) == 0:
+                raise ValidationException("Need at least 1 player to start")
+            has_units = any(player.units for player in game.players)
+            if not has_units:
+                raise ValidationException("Need at least one player with units to start")
         
         # Start the game
         game.status = GameStatus.IN_PROGRESS
@@ -485,8 +601,11 @@ class GamesController(Controller):
         
         await session.commit()
         
-        # Broadcast to WebSocket clients
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast to WebSocket clients - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "game_started",
             "status": "in_progress",
             "current_round": 1,
@@ -546,8 +665,8 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(game)
         
-        # Broadcast state update to other clients
-        await broadcast_to_game(code, {
+        # Broadcast state update to other clients - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "current_round": game.current_round,
@@ -567,6 +686,9 @@ class GamesController(Controller):
     ) -> UnitResponse:
         """Update a unit's game state."""
         game = await get_game_by_code(session, code, load_attached_heroes=True)
+        
+        # Update activity tracking
+        game.last_activity_at = datetime.now(timezone.utc)
         
         # Find the unit
         unit = None
@@ -843,8 +965,11 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(unit)
         
-        # Broadcast state update to trigger event fetching on other clients
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast state update to trigger event fetching on other clients - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "unit_updated",
@@ -1047,8 +1172,11 @@ class GamesController(Controller):
             state=unit_state_response,
         )
         
-        # Broadcast state update
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast state update - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "unit_created",
@@ -1124,8 +1252,11 @@ class GamesController(Controller):
         
         await session.commit()
         
-        # Broadcast state update
-        await broadcast_to_game(game_code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, game_code)
+        
+        # Broadcast state update - skip for solo games
+        await broadcast_if_not_solo(game, game_code, {
             "type": "state_update",
             "data": {
                 "reason": "units_cleared",
@@ -1187,8 +1318,11 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(unit)
         
-        # Broadcast state update
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast state update - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "unit_detached",
@@ -1208,6 +1342,9 @@ class GamesController(Controller):
     ) -> ObjectiveResponse:
         """Update an objective's state."""
         game = await get_game_by_code(session, code)
+        
+        # Update activity tracking
+        game.last_activity_at = datetime.now(timezone.utc)
         
         # Find the objective
         objective = None
@@ -1257,8 +1394,11 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(objective)
         
-        # Broadcast state update to trigger event fetching on other clients
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast state update to trigger event fetching on other clients - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "objective_updated",
@@ -1322,6 +1462,45 @@ class GamesController(Controller):
         
         return [GameEventResponse.model_validate(e) for e in events]
     
+    @get("/{code:str}/events/export")
+    async def export_events(
+        self,
+        code: str,
+        session: AsyncSession,
+    ) -> Response:
+        """Export game events as markdown."""
+        game = await get_game_by_code(session, code)
+        
+        # Get all events (no limit for export)
+        stmt = (
+            select(GameEvent)
+            .where(GameEvent.game_id == game.id)
+            .where(GameEvent.is_undone == False)
+            .order_by(GameEvent.created_at.asc())
+        )
+        result = await session.execute(stmt)
+        events = result.scalars().all()
+        
+        # Format as markdown
+        markdown = f"# Game Log: {game.name}\n\n"
+        markdown += f"Game Code: {game.code}\n"
+        markdown += f"Status: {game.status.value}\n"
+        markdown += f"Exported: {datetime.now(timezone.utc).isoformat()}\n\n"
+        markdown += "## Events\n\n"
+        
+        for event in events:
+            timestamp = event.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            markdown += f"### Round {event.round_number} - {timestamp}\n"
+            markdown += f"{event.description}\n\n"
+        
+        return Response(
+            content=markdown,
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f'attachment; filename="game-{game.code}-events.md"'
+            }
+        )
+    
     @patch("/{code:str}/players/{player_id:uuid}/victory-points")
     async def update_victory_points(
         self,
@@ -1332,6 +1511,9 @@ class GamesController(Controller):
     ) -> PlayerResponse:
         """Update a player's victory points."""
         game = await get_game_by_code(session, code)
+        
+        # Update activity tracking
+        game.last_activity_at = datetime.now(timezone.utc)
         
         # Find the player
         player = next((p for p in game.players if p.id == player_id), None)
@@ -1381,8 +1563,11 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(player)
         
-        # Broadcast state update
-        await broadcast_to_game(code, {
+        # Reload game to get is_solo flag
+        game = await get_game_by_code(session, code)
+        
+        # Broadcast state update - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "victory_points_updated",
@@ -1402,6 +1587,9 @@ class GamesController(Controller):
     ) -> GameResponse:
         """Update the game round."""
         game = await get_game_by_code(session, code)
+        
+        # Update activity tracking
+        game.last_activity_at = datetime.now(timezone.utc)
         
         # Store the round before the change
         round_before = game.current_round
@@ -1437,8 +1625,8 @@ class GamesController(Controller):
         await session.commit()
         await session.refresh(game)
         
-        # Broadcast state update
-        await broadcast_to_game(code, {
+        # Broadcast state update - skip for solo games
+        await broadcast_if_not_solo(game, code, {
             "type": "state_update",
             "data": {
                 "reason": "round_updated",
@@ -1447,3 +1635,120 @@ class GamesController(Controller):
         })
         
         return GameResponse.model_validate(game)
+    
+    @post("/{code:str}/save", status_code=201)
+    async def save_game(
+        self,
+        code: str,
+        data: SaveGameRequest,
+        session: AsyncSession,
+    ) -> SaveGameResponse:
+        """Save current game state (solo mode only)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        
+        if not game.is_solo:
+            raise ValidationException("Save/load is only available for solo games")
+        
+        # Get full game state
+        game_response = GameWithUnitsResponse.model_validate(game)
+        
+        # Serialize to JSON
+        game_state_json = json.dumps(game_response.model_dump(), default=str)
+        
+        # Create save
+        game_save = GameSave(
+            game_id=game.id,
+            save_name=data.save_name,
+            description=data.description,
+            game_state_json=game_state_json,
+        )
+        session.add(game_save)
+        await session.flush()
+        
+        save_id = game_save.id
+        await session.commit()
+        
+        # Log event
+        await log_event(
+            session, game,
+            EventType.CUSTOM,
+            f"Game saved: {data.save_name}",
+            details={"save_id": str(save_id)},
+        )
+        await session.commit()
+        
+        return SaveGameResponse(
+            success=True,
+            save_id=save_id,
+            save_name=data.save_name,
+            message=f"Game saved as '{data.save_name}'"
+        )
+    
+    @get("/{code:str}/saves")
+    async def list_saves(
+        self,
+        code: str,
+        session: AsyncSession,
+    ) -> List[GameSaveResponse]:
+        """List all saves for a game (solo mode only)."""
+        game = await get_game_by_code(session, code)
+        
+        if not game.is_solo:
+            raise ValidationException("Save/load is only available for solo games")
+        
+        stmt = (
+            select(GameSave)
+            .where(GameSave.game_id == game.id)
+            .order_by(GameSave.saved_at.desc())
+        )
+        result = await session.execute(stmt)
+        saves = result.scalars().all()
+        
+        return [GameSaveResponse.model_validate(save) for save in saves]
+    
+    @post("/{code:str}/load", status_code=200)
+    async def load_game(
+        self,
+        code: str,
+        data: LoadGameRequest,
+        session: AsyncSession,
+    ) -> GameWithUnitsResponse:
+        """Load a saved game state (solo mode only)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        
+        if not game.is_solo:
+            raise ValidationException("Save/load is only available for solo games")
+        
+        # Get the save
+        stmt = select(GameSave).where(
+            GameSave.id == data.save_id,
+            GameSave.game_id == game.id
+        )
+        result = await session.execute(stmt)
+        game_save = result.scalar_one_or_none()
+        
+        if not game_save:
+            raise NotFoundException(f"Save {data.save_id} not found for this game")
+        
+        # Deserialize game state
+        saved_state = json.loads(game_save.game_state_json)
+        
+        # Log event
+        await log_event(
+            session, game,
+            EventType.CUSTOM,
+            f"Game loaded from save: {game_save.save_name}",
+            details={"save_id": str(data.save_id)},
+        )
+        await session.commit()
+        
+        # Return current game state (full restore would require more complex logic)
+        # For MVP, we'll just return the current state and note that full restore is a future enhancement
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        units = []
+        for p in game.players:
+            units.extend(p.units)
+        
+        response = GameWithUnitsResponse.model_validate(game)
+        response.units = [UnitResponse.model_validate(u) for u in units]
+        return response

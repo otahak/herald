@@ -4,9 +4,10 @@ import enum
 import secrets
 import string
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import String, Integer, Enum, ForeignKey
+from sqlalchemy import String, Integer, Enum, ForeignKey, Boolean, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -29,6 +30,7 @@ class GameStatus(str, enum.Enum):
     IN_PROGRESS = "in_progress"  # Game is being played
     PAUSED = "paused"         # Game paused (players can rejoin)
     COMPLETED = "completed"   # Game finished
+    EXPIRED = "expired"       # Game expired due to inactivity
 
 
 def generate_join_code(length: int = 6) -> str:
@@ -61,6 +63,16 @@ class Game(Base):
     status: Mapped[GameStatus] = mapped_column(
         Enum(GameStatus),
         default=GameStatus.LOBBY,
+    )
+    
+    # Solo play mode (single player controls both armies)
+    is_solo: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Activity tracking for expiration
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
     )
     
     # Turn tracking

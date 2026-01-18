@@ -292,6 +292,10 @@ class ProxyController(Controller):
             logger.warning(f"Player {data.player_id} not found in game {game_code}")
             raise NotFoundException(f"Player {data.player_id} not found in game")
         
+        # Update activity tracking
+        from datetime import datetime, timezone
+        game.last_activity_at = datetime.now(timezone.utc)
+        
         # Extract list ID and fetch from Army Forge
         try:
             list_id = extract_list_id(data.army_forge_url)
@@ -315,9 +319,24 @@ class ProxyController(Controller):
                 if e.response.status_code == 404:
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
+                    # Try to get more details from the response
+                    error_detail = "Unknown error"
+                    try:
+                        error_body = e.response.json()
+                        error_detail = error_body.get("error", error_body.get("message", str(error_body)))
+                    except:
+                        error_text = e.response.text[:200] if e.response.text else "No error details"
+                        error_detail = error_text
+                    
+                    logger.error(f"Army Forge 500 error details: {error_detail}")
                     raise ValidationException(
-                        f"Army Forge server error - the list may be invalid or expired. "
-                        f"Try re-sharing your list from Army Forge."
+                        f"Army Forge server error (500) for list '{list_id}'. "
+                        f"This may happen with custom armies or expired lists. "
+                        f"Please try:\n"
+                        f"1. Re-sharing the list from Army Forge\n"
+                        f"2. Verifying the list ID is correct\n"
+                        f"3. Using a different army list\n\n"
+                        f"Error details: {error_detail[:100]}"
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException:

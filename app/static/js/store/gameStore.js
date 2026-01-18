@@ -115,7 +115,7 @@ const GameStore = {
         /**
          * Create a new game
          */
-        async createGame(name, playerName, playerColor) {
+        async createGame(name, playerName, playerColor, isSolo = false) {
             GameStore.state.isLoading = true;
             GameStore.state.error = null;
             
@@ -128,6 +128,7 @@ const GameStore = {
                         name,
                         player_name: playerName,
                         player_color: playerColor,
+                        is_solo: isSolo,
                     }),
                 });
                 
@@ -195,8 +196,13 @@ const GameStore = {
          * Fetch game state
          */
         async fetchGame(code) {
-            GameStore.state.isLoading = true;
-            GameStore.state.error = null;
+            // Only set isLoading if we don't already have game data (initial load)
+            // If we're refreshing after an operation, don't show global loading spinner
+            const isInitialLoad = !GameStore.state.game;
+            if (isInitialLoad) {
+                GameStore.state.isLoading = true;
+                GameStore.state.error = null;
+            }
             
             try {
                 const basePath = GameStore.getBasePath();
@@ -204,7 +210,18 @@ const GameStore = {
                 
                 if (!response.ok) {
                     const error = await response.json();
-                    throw new Error(error.detail || 'Failed to fetch game');
+                    const errorMessage = error.detail || 'Failed to fetch game';
+                    
+                    // Only set global error for initial load failures (critical)
+                    // For refresh failures, just log and return current state
+                    if (isInitialLoad) {
+                        GameStore.state.error = errorMessage;
+                        throw new Error(errorMessage);
+                    } else {
+                        Debug.error('Game refresh failed (non-critical):', errorMessage);
+                        // Return current game state instead of throwing
+                        return GameStore.state.game;
+                    }
                 }
                 
                 const game = await response.json();
@@ -215,34 +232,45 @@ const GameStore = {
                 
                 return game;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Only set global error for initial load (critical)
+                if (isInitialLoad) {
+                    GameStore.state.error = error.message;
+                }
                 throw error;
             } finally {
-                GameStore.state.isLoading = false;
+                if (isInitialLoad) {
+                    GameStore.state.isLoading = false;
+                }
             }
         },
         
         /**
          * Import army from Army Forge
          */
-        async importArmy(code, armyForgeUrl) {
-            GameStore.state.isLoading = true;
-            GameStore.state.error = null;
+        async importArmy(code, armyForgeUrl, playerId = null) {
+            // Don't set isLoading for import - let the UI handle its own loading state
+            // This prevents the global loading spinner from blocking the UI
+            // Don't set global error state - handle errors locally
             
             try {
+                // Use provided playerId or fall back to currentPlayerId
+                const targetPlayerId = playerId || GameStore.state.currentPlayerId;
+                
                 const basePath = GameStore.getBasePath();
                 const response = await fetch(`${basePath}/api/proxy/import-army/${code}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         army_forge_url: armyForgeUrl,
-                        player_id: GameStore.state.currentPlayerId,
+                        player_id: targetPlayerId,
                     }),
                 });
                 
                 if (!response.ok) {
                     const error = await response.json();
-                    throw new Error(error.detail || 'Failed to import army');
+                    const errorMessage = error.detail || error.message || `HTTP ${response.status}: Failed to import army`;
+                    Debug.error('Army import failed:', errorMessage, error);
+                    throw new Error(errorMessage);
                 }
                 
                 const result = await response.json();
@@ -255,27 +283,30 @@ const GameStore = {
                 
                 return result;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for import failures - these should be handled locally
+                // Only log the error for debugging
+                Debug.error('Army import failed (non-critical):', error.message);
                 throw error;
-            } finally {
-                GameStore.state.isLoading = false;
             }
         },
         
         /**
          * Create a unit manually
          */
-        async createUnitManually(code, unitData) {
-            GameStore.state.isLoading = true;
-            GameStore.state.error = null;
+        async createUnitManually(code, unitData, playerId = null) {
+            // Don't set isLoading for unit creation - let the UI handle its own loading state
+            // This prevents the global loading spinner from blocking the UI
             
             try {
+                // Use provided playerId or fall back to currentPlayerId
+                const targetPlayerId = playerId || GameStore.state.currentPlayerId;
+                
                 const basePath = GameStore.getBasePath();
                 const response = await fetch(`${basePath}/api/games/${code}/units/manual`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        player_id: GameStore.state.currentPlayerId,
+                        player_id: targetPlayerId,
                         ...unitData,
                     }),
                 });
@@ -290,15 +321,136 @@ const GameStore = {
                 // Refresh game state to get new unit
                 await this.fetchGame(code);
                 
+                // Fetch events for solo mode compatibility
+                await this.fetchEvents();
+                
                 // Broadcast to other players via WebSocket
                 this.broadcastStateUpdate({ type: 'unit_created' });
                 
                 return result;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for unit creation failures - these should be handled locally
+                // Only log the error for debugging
+                Debug.error('Unit creation failed (non-critical):', error.message);
                 throw error;
-            } finally {
-                GameStore.state.isLoading = false;
+            }
+        },
+        
+        /**
+         * Switch which player you're controlling (solo mode only)
+         */
+        switchPlayer(playerId) {
+            if (!GameStore.state.game?.is_solo) {
+                Debug.warn('Player switching is only available in solo mode');
+                return;
+            }
+            
+            const player = GameStore.state.players.find(p => p.id === playerId);
+            if (!player) {
+                Debug.error('Player not found:', playerId);
+                return;
+            }
+            
+            GameStore.state.currentPlayerId = playerId;
+            Debug.log('Switched to controlling player:', player.name);
+        },
+        
+        /**
+         * Save game state (solo mode only)
+         */
+        async saveGame(code, saveName, description = null) {
+            // Don't set isLoading for save game - let the UI handle its own loading state
+            // Don't set global error state - handle errors locally
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        save_name: saveName,
+                        description: description,
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to save game');
+                }
+                
+                const result = await response.json();
+                
+                // Refresh game state
+                await this.fetchGame(code);
+                
+                return result;
+            } catch (error) {
+                // Don't set global error state for save game failures - these should be handled locally
+                Debug.error('Save game failed (non-critical):', error.message);
+                throw error;
+            }
+        },
+        
+        /**
+         * List all saves for a game (solo mode only)
+         */
+        async listSaves(code) {
+            // Don't set isLoading for list saves - let the UI handle its own loading state
+            // Don't set global error state - handle errors locally
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/saves`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to list saves');
+                }
+                
+                const saves = await response.json();
+                return saves;
+            } catch (error) {
+                // Don't set global error state for list saves failures - these should be handled locally
+                Debug.error('List saves failed (non-critical):', error.message);
+                throw error;
+            }
+        },
+        
+        /**
+         * Load a saved game state (solo mode only)
+         */
+        async loadGame(code, saveId) {
+            // Don't set isLoading for load game - let the UI handle its own loading state
+            // Don't set global error state - handle errors locally
+            
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/load`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        save_id: saveId,
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to load game');
+                }
+                
+                const game = await response.json();
+                
+                // Refresh game state
+                await this.fetchGame(code);
+                
+                return game;
+            } catch (error) {
+                // Don't set global error state for load game failures - these should be handled locally
+                Debug.error('Load game failed (non-critical):', error.message);
+                throw error;
             }
         },
         
@@ -306,8 +458,7 @@ const GameStore = {
          * Clear all units for the current player
          */
         async clearAllUnits(code, playerId) {
-            GameStore.state.isLoading = true;
-            GameStore.state.error = null;
+            // Don't set isLoading for clear units - let the UI handle its own loading state
             
             try {
                 const basePath = GameStore.getBasePath();
@@ -326,15 +477,17 @@ const GameStore = {
                 // Refresh game state to reflect cleared units
                 await this.fetchGame(code);
                 
+                // Fetch events for solo mode compatibility
+                await this.fetchEvents();
+                
                 // Broadcast to other players via WebSocket
                 this.broadcastStateUpdate({ type: 'units_cleared' });
                 
                 return result;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for clear units failures - these should be handled locally
+                Debug.error('Clear units failed (non-critical):', error.message);
                 throw error;
-            } finally {
-                GameStore.state.isLoading = false;
             }
         },
         
@@ -374,7 +527,8 @@ const GameStore = {
                 
                 return updatedUnit;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for unit update failures - these should be handled locally
+                Debug.error('Unit update failed (non-critical):', error.message);
                 throw error;
             }
         },
@@ -410,6 +564,9 @@ const GameStore = {
                     GameStore.state.objectives[index] = updatedObjective;
                 }
                 
+                // Fetch events for solo mode compatibility
+                await this.fetchEvents();
+                
                 // Broadcast to other players
                 this.broadcastStateUpdate({ 
                     type: 'objective_updated', 
@@ -418,7 +575,8 @@ const GameStore = {
                 
                 return updatedObjective;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for objective update failures - these should be handled locally
+                Debug.error('Objective update failed (non-critical):', error.message);
                 throw error;
             }
         },
@@ -451,7 +609,8 @@ const GameStore = {
                 
                 return objectives;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for objective creation failures - these should be handled locally
+                Debug.error('Objective creation failed (non-critical):', error.message);
                 throw error;
             }
         },
@@ -462,6 +621,9 @@ const GameStore = {
         async startGame() {
             const code = GameStore.state.game?.code;
             if (!code) return;
+            
+            // Don't set isLoading for start game - let the UI handle its own loading state
+            // Don't set global error state - handle errors locally (start game failures are non-critical)
             
             try {
                 const basePath = GameStore.getBasePath();
@@ -485,7 +647,8 @@ const GameStore = {
                 
                 return game;
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for start game failures - these should be handled locally
+                Debug.error('Start game failed (non-critical):', error.message);
                 throw error;
             }
         },
@@ -515,11 +678,15 @@ const GameStore = {
                 // Refresh game state
                 await this.fetchGame(code);
                 
+                // Fetch events for solo mode compatibility
+                await this.fetchEvents();
+                
                 // Broadcast to other players
                 this.broadcastStateUpdate({ type: 'round_advanced', round: newRound });
                 
             } catch (error) {
-                GameStore.state.error = error.message;
+                // Don't set global error state for round advancement failures - these should be handled locally
+                Debug.error('Round advancement failed (non-critical):', error.message);
                 throw error;
             }
         },
@@ -545,15 +712,24 @@ const GameStore = {
                 
                 return events;
             } catch (error) {
-                GameStore.state.error = error.message;
-                throw error;
+                // Don't set global error state for event fetch failures - these should be handled silently
+                // Events are fetched in background, failures shouldn't disrupt the game
+                Debug.error('Event fetch failed (non-critical, will retry):', error.message);
+                // Return empty array instead of throwing to prevent UI disruption
+                return [];
             }
         },
         
         /**
-         * Connect to WebSocket for real-time updates
+         * Connect to WebSocket for real-time updates (skips for solo games)
          */
         connectWebSocket(code) {
+            // Skip WebSocket for solo games
+            if (GameStore.state.game?.is_solo) {
+                Debug.log('Skipping WebSocket connection for solo game');
+                return;
+            }
+            
             if (GameStore.state.ws) {
                 GameStore.state.ws.close();
             }
