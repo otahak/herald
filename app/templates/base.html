@@ -17,7 +17,8 @@
     <link rel="stylesheet" href="/static/css/main.css">
     {% block head %}{% endblock %}
 </head>
-<body class="flex flex-col min-h-screen">
+<body class="flex flex-col min-h-screen" data-base-path="{{ get_base_path() }}">
+    <script>window.HERALD_BASE_PATH = {{ (get_base_path() or '')|tojson }};</script>
     {% include "nav.html" %}
     <main id="app" class="flex-1 pb-20">
         {% block content %}{% endblock %}

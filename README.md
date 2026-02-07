@@ -73,6 +73,7 @@ Quick summary:
 - Automated deploy script (`deploy/deploy.sh`) sets up everything
 - Database initialization script (`deploy/init_db.py`) creates schema
 - **Automated Migrations**: Migrations run automatically on application startup (can be disabled with `AUTO_RUN_MIGRATIONS=false`)
+- **Base path**: If the app is served under a subpath (e.g. `/herald`), set `BASE_PATH=/herald` in the environment so the frontend and API paths match.
 
 For a 2GB/1vCPU droplet, the service runs 2 uvicorn workers and binds to localhost (nginx handles external traffic).
 

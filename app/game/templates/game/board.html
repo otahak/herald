@@ -109,6 +109,22 @@
 
 {% block content %}
 <div id="game-board" class="min-h-screen bg-base-300">
+    <!-- Toast notifications (replaces alert()) -->
+    <div class="toast toast-top toast-end z-[100] gap-2 p-4" v-if="toasts.length > 0">
+        <div
+            v-for="t in toasts"
+            :key="t.id"
+            class="alert shadow-lg max-w-sm"
+            :class="{
+                'alert-error': t.type === 'error',
+                'alert-success': t.type === 'success',
+                'alert-info': t.type === 'info'
+            }"
+        >
+            <span>[[ t.message ]]</span>
+            <button type="button" class="btn btn-ghost btn-xs" @click="dismissToast(t.id)" aria-label="Dismiss">×</button>
+        </div>
+    </div>
     
     <!-- Loading State -->
     <div v-if="isLoading" class="flex items-center justify-center min-h-screen">
@@ -193,6 +209,7 @@
                             :key="unit.id"
                             :unit="unit"
                             :is-mine="leftPlayer.id === currentPlayerId"
+                            :show-toast="showToast"
                             @update="updateUnit"
                             @open-action-modal="openActionModal"
                         ></unit-card>
@@ -500,6 +517,7 @@
                             :key="unit.id"
                             :unit="unit"
                             :is-mine="rightPlayer.id === currentPlayerId"
+                            :show-toast="showToast"
                             @update="updateUnit"
                             @open-action-modal="openActionModal"
                         ></unit-card>
@@ -784,11 +802,64 @@
                     </select>
                 </div>
                 
+                <!-- Special rules (structured) -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Special Rules</span>
+                    </label>
+                    <div class="space-y-2">
+                        <div v-for="(row, i) in manualUnitForm.rulesRows" :key="'rule-' + i" class="flex gap-2 items-center">
+                            <input type="text" v-model="row.name" placeholder="Rule name (e.g. Tough, Hero)" class="input input-bordered input-sm flex-1" />
+                            <input type="number" v-model.number="row.rating" placeholder="Rating" min="1" max="6" class="input input-bordered input-sm w-20" />
+                            <button type="button" class="btn btn-ghost btn-xs" @click="removeRuleRow(i)" aria-label="Remove">×</button>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" @click="addRuleRow">Add rule</button>
+                    </div>
+                </div>
+                
+                <!-- Weapons / Equipment (structured) -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Weapons / Equipment</span>
+                    </label>
+                    <div class="space-y-2">
+                        <div v-for="(row, i) in manualUnitForm.loadoutRows" :key="'loadout-' + i" class="p-2 bg-base-200 rounded space-y-1">
+                            <div class="flex gap-2 flex-wrap">
+                                <input type="text" v-model="row.name" placeholder="Name *" class="input input-bordered input-sm flex-1 min-w-24" />
+                                <input type="text" v-model="row.label" placeholder="Label" class="input input-bordered input-sm w-24" />
+                                <input type="number" v-model.number="row.range" placeholder="Range" min="0" class="input input-bordered input-sm w-20" />
+                                <input type="number" v-model.number="row.attacks" placeholder="Attacks" min="0" class="input input-bordered input-sm w-20" />
+                                <label class="label cursor-pointer gap-1">
+                                    <span class="label-text text-xs">Limited</span>
+                                    <input type="checkbox" v-model="row.limited" class="checkbox checkbox-xs" />
+                                </label>
+                                <button type="button" class="btn btn-ghost btn-xs" @click="removeLoadoutRow(i)" aria-label="Remove">×</button>
+                            </div>
+                            <input type="text" v-model="row.specialRules" placeholder="Special rules (e.g. AP(1), Limited)" class="input input-bordered input-sm w-full text-xs" />
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" @click="addLoadoutRow">Add weapon</button>
+                    </div>
+                </div>
+                
+                <!-- Upgrades (structured) -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Upgrades (optional)</span>
+                    </label>
+                    <div class="space-y-2">
+                        <div v-for="(row, i) in manualUnitForm.upgradesRows" :key="'upgrade-' + i" class="flex gap-2 items-center">
+                            <input type="text" v-model="row.name" placeholder="Upgrade name" class="input input-bordered input-sm flex-1" />
+                            <button type="button" class="btn btn-ghost btn-xs" @click="removeUpgradeRow(i)" aria-label="Remove">×</button>
+                        </div>
+                        <button type="button" class="btn btn-outline btn-sm" @click="addUpgradeRow">Add upgrade</button>
+                    </div>
+                </div>
+                
                 <!-- Advanced (JSON) -->
                 <div class="collapse collapse-arrow bg-base-200">
                     <input type="checkbox" />
                     <div class="collapse-title text-sm font-medium">
-                        Advanced: Loadout & Rules (JSON)
+                        Advanced: Loadout & Rules (JSON override)
                     </div>
                     <div class="collapse-content space-y-2">
                         <div class="form-control">
@@ -1369,6 +1440,34 @@
                     Destroy
                 </button>
             </div>
+            
+            <!-- Expandable Unit Details (rules, loadout, upgrades) -->
+            <div class="mt-2 border-t border-base-200 pt-2">
+                <button type="button" class="btn btn-ghost btn-xs w-full" @click="showDetails = !showDetails">
+                    [[ showDetails ? 'Hide' : 'Show' ]] details
+                </button>
+                <div v-if="showDetails" class="mt-2 space-y-2 text-xs">
+                    <div v-if="rulesDisplay.length > 0">
+                        <div class="font-semibold text-base-content/70">Rules</div>
+                        <div class="flex flex-wrap gap-1">
+                            <span v-for="(r, i) in rulesDisplay" :key="i" class="badge badge-ghost badge-sm">[[ r ]]</span>
+                        </div>
+                    </div>
+                    <div v-if="fullLoadoutDisplay.length > 0">
+                        <div class="font-semibold text-base-content/70">Weapons / Equipment</div>
+                        <ul class="list-disc list-inside space-y-0.5">
+                            <li v-for="(w, i) in fullLoadoutDisplay" :key="i">[[ w.displayText ]]</li>
+                        </ul>
+                    </div>
+                    <div v-if="upgradesDisplay.length > 0">
+                        <div class="font-semibold text-base-content/70">Upgrades</div>
+                        <ul class="list-none space-y-1 pl-0">
+                            <li v-for="(u, i) in upgradesDisplay" :key="i" class="text-base-content/90">[[ u ]]</li>
+                        </ul>
+                    </div>
+                    <div v-if="showDetails && rulesDisplay.length === 0 && fullLoadoutDisplay.length === 0 && upgradesDisplay.length === 0" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
+                </div>
+            </div>
         </div>
         
         <!-- Attached Heroes (nested below parent unit) -->
@@ -1415,6 +1514,34 @@
                         <span v-if="hero.is_caster" class="ml-2">T: [[ hero.state?.spell_tokens || 0 ]] / 6</span>
                         <span v-if="hero.state?.is_shaken" class="ml-2 text-warning">⚠ Shaken</span>
                     </div>
+                    
+                    <!-- Attached hero expandable details (rules, loadout, upgrades) -->
+                    <div class="mt-2 border-t border-base-300 pt-2">
+                        <button type="button" class="btn btn-ghost btn-xs w-full" @click="toggleHeroDetails(hero.id)">
+                            [[ heroDetailsExpanded(hero.id) ? 'Hide' : 'Show' ]] details
+                        </button>
+                        <div v-if="heroDetailsExpanded(hero.id)" class="mt-2 space-y-2 text-xs">
+                            <div v-if="getRulesForUnit(hero).length > 0">
+                                <div class="font-semibold text-base-content/70">Rules</div>
+                                <div class="flex flex-wrap gap-1">
+                                    <span v-for="(r, i) in getRulesForUnit(hero)" :key="i" class="badge badge-ghost badge-sm">[[ r ]]</span>
+                                </div>
+                            </div>
+                            <div v-if="getLoadoutForUnit(hero).length > 0">
+                                <div class="font-semibold text-base-content/70">Weapons / Equipment</div>
+                                <ul class="list-disc list-inside space-y-0.5">
+                                    <li v-for="(w, i) in getLoadoutForUnit(hero)" :key="i">[[ w.displayText ]]</li>
+                                </ul>
+                            </div>
+                            <div v-if="getUpgradesForUnit(hero).length > 0">
+                                <div class="font-semibold text-base-content/70">Upgrades</div>
+                                <ul class="list-disc list-inside space-y-1">
+                                    <li v-for="(u, i) in getUpgradesForUnit(hero)" :key="i" class="text-base-content/90">[[ u ]]</li>
+                                </ul>
+                            </div>
+                            <div v-if="heroDetailsExpanded(hero.id) && getRulesForUnit(hero).length === 0 && getLoadoutForUnit(hero).length === 0 && getUpgradesForUnit(hero).length === 0" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
+                        </div>
+                    </div>
                 </div>
                 </div>
             </template>
@@ -1434,10 +1561,12 @@ document.addEventListener("DOMContentLoaded", () => {
         props: {
             unit: { type: Object, required: true },
             isMine: { type: Boolean, default: false },
+            showToast: { type: Function, default: () => {} },
         },
         emits: ['update', 'open-action-modal'],
         setup(props, { emit }) {
             const store = GameStore;
+            const showDetails = ref(false);
             
             const maxWounds = computed(() => props.unit.size * props.unit.tough);
             
@@ -1549,6 +1678,77 @@ document.addEventListener("DOMContentLoaded", () => {
                 return weapons;
             });
             
+            // Helpers that take any unit object (for main unit or attached heroes)
+            const formatUpgradeItem = (u) => {
+                if (u == null) return '';
+                if (typeof u === 'string') return u.trim() || '';
+                if (typeof u !== 'object') return String(u);
+                const main = (u.label || u.name || u.title || '').toString().trim();
+                const content = u.content || u.options || u.items;
+                const contentLabels = Array.isArray(content)
+                    ? content
+                        .map(c => typeof c === 'string' ? c.trim() : (c && (c.label || c.name || c.title || c.text) || '').toString().trim())
+                        .filter(Boolean)
+                    : [];
+                const contentStr = contentLabels.length ? contentLabels.join(', ') : '';
+                if (main && contentStr) return `${main}: ${contentStr}`;
+                if (contentStr) return contentStr;
+                if (main) return main;
+                const desc = (u.description || u.text || '').toString().trim();
+                if (desc) return desc.length > 60 ? desc.slice(0, 57) + '…' : desc;
+                return '';
+            };
+            const getRulesForUnit = (unit) => {
+                const rules = unit && unit.rules;
+                if (!rules || !Array.isArray(rules)) return [];
+                return rules.map(r => {
+                    if (typeof r === 'string') return r;
+                    const name = (r && (r.name || r.label)) || '';
+                    const rating = r && r.rating != null && r.rating !== '' ? r.rating : null;
+                    return rating != null ? `${name}(${rating})` : name;
+                }).filter(Boolean);
+            };
+            const getLoadoutForUnit = (unit) => {
+                const loadout = unit && unit.loadout;
+                if (!loadout || !Array.isArray(loadout)) return [];
+                const out = [];
+                const process = (items) => {
+                    for (const item of items) {
+                        const name = item.label || item.name || 'Weapon';
+                        const range = item.range != null ? `${item.range}"` : '';
+                        const attacks = item.attacks != null ? `A${item.attacks}` : '';
+                        const rules = (item.specialRules || []).map(sr => {
+                            const n = (sr && (sr.name || sr.label)) || '';
+                            const r = sr && sr.rating != null && sr.rating !== '' ? sr.rating : null;
+                            return r != null ? `${n}(${r})` : n;
+                        }).filter(Boolean);
+                        const rulesStr = rules.length ? ` [${rules.join(', ')}]` : '';
+                        out.push({ displayText: [name, range, attacks].filter(Boolean).join(' ') + rulesStr });
+                        if (item.content && Array.isArray(item.content)) process(item.content);
+                    }
+                };
+                process(loadout);
+                return out;
+            };
+            const getUpgradesForUnit = (unit) => {
+                const up = unit && unit.upgrades;
+                if (!up || !Array.isArray(up)) return [];
+                return up.map(formatUpgradeItem).filter(Boolean);
+            };
+            
+            const rulesDisplay = computed(() => getRulesForUnit(props.unit));
+            const fullLoadoutDisplay = computed(() => getLoadoutForUnit(props.unit));
+            const upgradesDisplay = computed(() => getUpgradesForUnit(props.unit));
+            
+            const expandedHeroDetails = ref({});
+            const heroDetailsExpanded = (heroId) => !!expandedHeroDetails.value[String(heroId)];
+            const toggleHeroDetails = (heroId) => {
+                const id = String(heroId);
+                const next = { ...expandedHeroDetails.value };
+                next[id] = !next[id];
+                expandedHeroDetails.value = next;
+            };
+            
             const isWeaponUsed = (weaponName) => {
                 const usedList = props.unit.state?.limited_weapons_used || [];
                 return usedList.includes(weaponName);
@@ -1577,7 +1777,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const toggleActivated = () => {
                 if (props.unit.attached_to_unit_id) {
-                    alert(`${props.unit.custom_name || props.unit.name} is attached to another unit and cannot be activated separately. Activate the parent unit instead.`);
+                    (props.showToast || (() => {}))(`${props.unit.custom_name || props.unit.name} is attached to another unit and cannot be activated separately. Activate the parent unit instead.`);
                     return;
                 }
                 // If unit is already activated, toggle it off
@@ -1644,11 +1844,21 @@ document.addEventListener("DOMContentLoaded", () => {
                     // Refresh game state
                     await store.actions.fetchGame(code);
                 } catch (error) {
-                    alert('Failed to detach unit: ' + error.message);
+                    (props.showToast || (() => {}))('Failed to detach unit: ' + error.message);
                 }
             };
             
             return {
+                showDetails,
+                rulesDisplay,
+                fullLoadoutDisplay,
+                upgradesDisplay,
+                getRulesForUnit,
+                getLoadoutForUnit,
+                getUpgradesForUnit,
+                expandedHeroDetails,
+                heroDetailsExpanded,
+                toggleHeroDetails,
                 maxWounds,
                 attachedHeroes,
                 attachedToUnitName,
@@ -1725,6 +1935,22 @@ document.addEventListener("DOMContentLoaded", () => {
             const selectedTargets = ref([]);
             const showClearLogModal = ref(false);
             const isClearingLog = ref(false);
+            const toasts = ref([]);
+            let toastTimeoutIds = {};
+            const showToast = (message, type = 'error') => {
+                const id = Date.now() + Math.random();
+                toasts.value = [...toasts.value, { id, message: String(message), type }];
+                const t = setTimeout(() => {
+                    toasts.value = toasts.value.filter(x => x.id !== id);
+                    delete toastTimeoutIds[id];
+                }, 5000);
+                toastTimeoutIds[id] = t;
+            };
+            const dismissToast = (id) => {
+                if (toastTimeoutIds[id]) clearTimeout(toastTimeoutIds[id]);
+                delete toastTimeoutIds[id];
+                toasts.value = toasts.value.filter(x => x.id !== id);
+            };
             const manualUnitForm = reactive({
                 name: '',
                 custom_name: '',
@@ -1743,14 +1969,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 attached_to_unit_id: null,
                 loadout_json: '',
                 rules_json: '',
+                rulesRows: [],
+                loadoutRows: [],
+                upgradesRows: [],
             });
             
-            // Helper to get base path based on environment
-            const getBasePath = () => {
-                return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-                    ? ''
-                    : '/herald';
-            };
+            const addRuleRow = () => { manualUnitForm.rulesRows.push({ name: '', rating: null }); };
+            const removeRuleRow = (i) => { manualUnitForm.rulesRows.splice(i, 1); };
+            const addLoadoutRow = () => { manualUnitForm.loadoutRows.push({ name: '', label: '', range: '', attacks: '', limited: false, specialRules: '' }); };
+            const removeLoadoutRow = (i) => { manualUnitForm.loadoutRows.splice(i, 1); };
+            const addUpgradeRow = () => { manualUnitForm.upgradesRows.push({ name: '' }); };
+            const removeUpgradeRow = (i) => { manualUnitForm.upgradesRows.splice(i, 1); };
+            
+            // Base path set by server in base template (window.HERALD_BASE_PATH)
+            const getBasePath = () => (window.HERALD_BASE_PATH !== undefined ? window.HERALD_BASE_PATH : '');
             
             // Computed
             const statusBadgeClass = computed(() => {
@@ -1859,12 +2091,12 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const logUnitAction = async () => {
                 if (!selectedUnitForAction.value || !selectedAction.value) {
-                    alert('Please select an action');
+                    showToast('Please select an action');
                     return;
                 }
                 
                 if ((selectedAction.value === 'charge' || selectedAction.value === 'attack') && selectedTargets.value.length === 0) {
-                    alert('Please select at least one target unit');
+                    showToast('Please select at least one target unit');
                     return;
                 }
                 
@@ -1887,7 +2119,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     // Refresh events
                     await store.actions.fetchEvents();
                 } catch (error) {
-                    alert('Failed to log action: ' + error.message);
+                    showToast('Failed to log action: ' + error.message);
                 }
             };
             
@@ -1932,7 +2164,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.fetchGame(code);
                     await store.actions.fetchEvents();
                 } catch (error) {
-                    alert('Failed to update VP: ' + error.message);
+                    showToast('Failed to update VP: ' + error.message);
                 }
             };
             
@@ -1962,7 +2194,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.fetchGame(code);
                     await store.actions.fetchEvents();
                 } catch (error) {
-                    alert('Failed to update round: ' + error.message);
+                    showToast('Failed to update round: ' + error.message);
                 }
             };
             
@@ -2020,7 +2252,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     url.toLowerCase().includes('traceback') ||
                     url.toLowerCase().includes('exception') ||
                     url.length > 500) {
-                    alert('Invalid input detected. Please paste the Army Forge share URL or list ID, not console output.\n\nExample: https://army-forge.onepagerules.com/share?id=XXXXX');
+                    showToast('Invalid input detected. Please paste the Army Forge share URL or list ID, not console output. Example: https://army-forge.onepagerules.com/share?id=XXXXX');
                     return;
                 }
                 
@@ -2032,7 +2264,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         : currentPlayerId.value;
                     
                     if (!playerId) {
-                        alert('No player selected. Please select a player first.');
+                        showToast('No player selected. Please select a player first.');
                         return;
                     }
                     
@@ -2042,7 +2274,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     console.error('Army import error:', error);
                     // Show error message - handle multi-line messages
                     const errorMsg = error.message || 'Unknown error occurred';
-                    alert(errorMsg);
+                    showToast(errorMsg);
                 } finally {
                     isImporting.value = false;
                 }
@@ -2050,37 +2282,71 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const submitManualUnit = async () => {
                 if (!manualUnitForm.name) {
-                    alert('Unit name is required');
+                    showToast('Unit name is required');
                     return;
                 }
                 
                 isCreatingUnit.value = true;
                 try {
-                    // Parse JSON fields if provided
                     let loadout = null;
                     let rules = null;
+                    let upgrades = null;
                     
+                    // Loadout: Advanced JSON override, else structured rows
                     if (manualUnitForm.loadout_json && manualUnitForm.loadout_json.trim()) {
                         try {
                             loadout = JSON.parse(manualUnitForm.loadout_json.trim());
                         } catch (e) {
-                            alert('Invalid loadout JSON: ' + e.message);
+                            showToast('Invalid loadout JSON: ' + e.message);
                             isCreatingUnit.value = false;
                             return;
                         }
+                    } else if (manualUnitForm.loadoutRows.length > 0) {
+                        loadout = manualUnitForm.loadoutRows
+                            .filter(r => r.name && r.name.trim())
+                            .map(r => {
+                                const specialRules = [];
+                                if (r.limited) specialRules.push({ name: 'Limited' });
+                                if (r.specialRules && r.specialRules.trim()) {
+                                    r.specialRules.split(',').forEach(s => {
+                                        const t = s.trim();
+                                        const match = t.match(/^(.+?)\((\d+)\)$/);
+                                        if (match) specialRules.push({ name: match[1].trim(), rating: parseInt(match[2], 10) });
+                                        else if (t) specialRules.push({ name: t });
+                                    });
+                                }
+                                return {
+                                    name: r.name.trim(),
+                                    label: r.label && r.label.trim() ? r.label.trim() : undefined,
+                                    range: r.range != null && r.range !== '' ? r.range : undefined,
+                                    attacks: r.attacks != null && r.attacks !== '' ? r.attacks : undefined,
+                                    specialRules: specialRules.length ? specialRules : undefined,
+                                };
+                            });
                     }
                     
+                    // Rules: Advanced JSON override, else structured rows
                     if (manualUnitForm.rules_json && manualUnitForm.rules_json.trim()) {
                         try {
                             rules = JSON.parse(manualUnitForm.rules_json.trim());
                         } catch (e) {
-                            alert('Invalid rules JSON: ' + e.message);
+                            showToast('Invalid rules JSON: ' + e.message);
                             isCreatingUnit.value = false;
                             return;
                         }
+                    } else if (manualUnitForm.rulesRows.length > 0) {
+                        rules = manualUnitForm.rulesRows
+                            .filter(r => r.name && r.name.trim())
+                            .map(r => ({ name: r.name.trim(), rating: r.rating != null && r.rating !== '' ? r.rating : null }));
                     }
                     
-                    // Build unit data
+                    // Upgrades: from structured rows only
+                    if (manualUnitForm.upgradesRows.length > 0) {
+                        upgrades = manualUnitForm.upgradesRows
+                            .filter(r => r.name && r.name.trim())
+                            .map(r => ({ name: r.name.trim() }));
+                    }
+                    
                     const unitData = {
                         name: manualUnitForm.name,
                         custom_name: manualUnitForm.custom_name || null,
@@ -2091,6 +2357,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         cost: manualUnitForm.cost,
                         loadout: loadout,
                         rules: rules,
+                        upgrades: upgrades,
                         is_hero: manualUnitForm.is_hero,
                         is_caster: manualUnitForm.is_caster,
                         caster_level: manualUnitForm.is_caster ? manualUnitForm.caster_level : 0,
@@ -2126,11 +2393,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     manualUnitForm.attached_to_unit_id = null;
                     manualUnitForm.loadout_json = '';
                     manualUnitForm.rules_json = '';
+                    manualUnitForm.rulesRows = [];
+                    manualUnitForm.loadoutRows = [];
+                    manualUnitForm.upgradesRows = [];
                     
-                    // Close modal
                     showManualUnitModal.value = false;
                 } catch (error) {
-                    alert('Failed to create unit: ' + error.message);
+                    showToast('Failed to create unit: ' + error.message);
                 } finally {
                     isCreatingUnit.value = false;
                 }
@@ -2138,7 +2407,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const confirmClearUnits = async () => {
                 if (!currentPlayerId.value) {
-                    alert('No player selected');
+                    showToast('No player selected');
                     return;
                 }
                 
@@ -2147,7 +2416,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.clearAllUnits(GAME_CODE, currentPlayerId.value);
                     showClearUnitsModal.value = false;
                 } catch (error) {
-                    alert('Failed to clear units: ' + error.message);
+                    showToast('Failed to clear units: ' + error.message);
                 } finally {
                     isClearingUnits.value = false;
                 }
@@ -2175,7 +2444,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     window.URL.revokeObjectURL(url);
                     document.body.removeChild(a);
                 } catch (error) {
-                    alert('Failed to export event log: ' + error.message);
+                    showToast('Failed to export event log: ' + error.message);
                 }
             };
             
@@ -2197,7 +2466,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     
                     showClearLogModal.value = false;
                 } catch (error) {
-                    alert('Failed to clear event log: ' + error.message);
+                    showToast('Failed to clear event log: ' + error.message);
                 } finally {
                     isClearingLog.value = false;
                 }
@@ -2205,7 +2474,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const saveGame = async () => {
                 if (!saveForm.saveName.trim()) {
-                    alert('Please enter a save name');
+                    showToast('Please enter a save name');
                     return;
                 }
                 
@@ -2219,9 +2488,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     showSaveModal.value = false;
                     saveForm.saveName = '';
                     saveForm.description = '';
-                    alert('Game saved successfully!');
+                    showToast('Game saved successfully!', 'success');
                 } catch (error) {
-                    alert('Failed to save game: ' + error.message);
+                    showToast('Failed to save game: ' + error.message);
                 } finally {
                     isSaving.value = false;
                 }
@@ -2233,9 +2502,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.loadGame(GAME_CODE, saveId);
                     showLoadModal.value = false;
                     await store.actions.fetchGame(GAME_CODE);
-                    alert('Game loaded successfully!');
+                    showToast('Game loaded successfully!', 'success');
                 } catch (error) {
-                    alert('Failed to load game: ' + error.message);
+                    showToast('Failed to load game: ' + error.message);
                 } finally {
                     isLoadingGame.value = false;
                 }
@@ -2248,7 +2517,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     gameSaves.value = await store.actions.listSaves(GAME_CODE);
                 } catch (error) {
-                    alert('Failed to load saves: ' + error.message);
+                    showToast('Failed to load saves: ' + error.message);
                 } finally {
                     isLoadingSaves.value = false;
                 }
@@ -2299,7 +2568,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.fetchGame(GAME_CODE);
                     await store.actions.fetchEvents();
                 } catch (error) {
-                    alert('Failed to create objectives: ' + error.message);
+                    showToast('Failed to create objectives: ' + error.message);
                 }
             };
             
@@ -2645,6 +2914,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedTargets,
                 showClearLogModal,
                 isClearingLog,
+                toasts,
+                showToast,
+                dismissToast,
                 
                 // Computed
                 statusBadgeClass,
@@ -2679,6 +2951,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectAction,
                 toggleTarget,
                 logUnitAction,
+                addRuleRow,
+                removeRuleRow,
+                addLoadoutRow,
+                removeLoadoutRow,
+                addUpgradeRow,
+                removeUpgradeRow,
             };
         },
     };

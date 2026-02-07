@@ -7,7 +7,7 @@ from typing import Optional, List, Any
 
 import httpx
 from litestar import Controller, get, post
-from litestar.exceptions import NotFoundException, ValidationException
+from litestar.exceptions import NotFoundException, ValidationException, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -261,10 +261,13 @@ class ProxyController(Controller):
     ) -> ImportArmyResponse:
         """
         Import an army from Army Forge into a game.
-        
+
         This fetches the army list, creates Unit and UnitState records
         for each unit, and links them to the specified player.
         """
+        from app.utils.rate_limit import check_rate_limit
+        if not check_rate_limit(f"import_army:{game_code.upper()}", max_requests=10, window_sec=60):
+            raise HTTPException(status_code=429, detail="Too many import requests. Please try again in a minute.")
         logger.info(f"Import army request for game {game_code}, player {data.player_id}")
         logger.debug(f"Army Forge URL/ID: {data.army_forge_url}")
         

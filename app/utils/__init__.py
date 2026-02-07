@@ -1,50 +1,43 @@
 """Utility functions for the Herald application."""
 
+import os
 from litestar import Request
 
 
 def get_base_path(request: Request) -> str:
     """
     Extract the base path from the request (e.g., '/herald' if app is served at /herald).
-    
-    Uses the request's root_path if available (set by uvicorn --root-path option),
-    otherwise extracts it from the URL path by finding common route prefixes.
+
+    Precedence: ASGI root_path > BASE_PATH env > path-based detection > production fallback > "".
     """
-    # First, try to use root_path from ASGI scope (set by uvicorn --root-path)
-    # This is the most reliable method when the app is served under a subpath
+    # 1. ASGI root_path (e.g. uvicorn --root-path /herald)
     try:
-        # Access the ASGI scope directly
         scope = getattr(request, "scope", None)
         if scope:
             root_path = scope.get("root_path", "")
             if root_path:
-                return root_path
+                return root_path.rstrip("/") or ""
     except (AttributeError, KeyError, TypeError):
         pass
-    
-    # Fallback: Extract from URL path by looking for known route prefixes
+
+    # 2. Explicit BASE_PATH environment variable (no hardcoded /herald)
+    base_path_env = os.getenv("BASE_PATH", "").strip().rstrip("/")
+    if base_path_env:
+        return base_path_env
+
+    # 3. Extract from URL path by known route prefixes
     path = request.url.path
-    
-    # Check for admin routes
     if "/admin" in path:
-        return path[:path.index("/admin")]
-    
-    # Check for API routes
+        return path[: path.index("/admin")].rstrip("/") or ""
     if "/api" in path:
-        return path[:path.index("/api")]
-    
-    # Check for other known route prefixes
-    known_prefixes = ["/game", "/feedback", "/users"]
-    for prefix in known_prefixes:
+        return path[: path.index("/api")].rstrip("/") or ""
+    for prefix in ["/game", "/feedback", "/users"]:
         if prefix in path:
-            return path[:path.index(prefix)]
-    
-    # If path is just "/" or empty, check if we're on a subpath by looking at the full URL
-    if path == "/" or path == "":
-        # Check if the hostname suggests we're in production (otahak.com)
-        # In production with nginx, the root_path should be set, but as fallback:
-        if request.url.hostname and ("otahak.com" in request.url.hostname or "localhost" not in request.url.hostname):
-            # Assume /herald base path in production if not explicitly set
+            return path[: path.index(prefix)].rstrip("/") or ""
+
+    # 4. Root path: production hostname fallback (only when nothing else set)
+    if path in ("/", "") and request.url.hostname:
+        if "localhost" not in (request.url.hostname or "") and "127.0.0.1" != request.url.hostname:
             return "/herald"
-    
+
     return ""

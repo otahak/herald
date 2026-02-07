@@ -291,9 +291,7 @@ document.addEventListener("DOMContentLoaded", () => {
         
         methods: {
             getBasePath() {
-                return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-                    ? ''
-                    : '/herald';
+                return (window.HERALD_BASE_PATH !== undefined ? window.HERALD_BASE_PATH : '');
             },
             
             async createGame() {

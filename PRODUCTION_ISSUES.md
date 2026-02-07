@@ -9,21 +9,10 @@
 - No authorization check - anyone with game code can clear events (low priority - game codes are effectively access tokens)
 - No validation of game status (should prevent clearing in certain states?) - currently allows clearing at any time
 
-### 2. Hardcoded Base Path
-**Location**: `app/game/templates/game/board.html:1749-1753`
-**Issue**: Hardcoded `/herald` path assumes specific deployment structure
-**Risk**: Will break if deployed under different path or subdomain
-
-**Current**:
-```javascript
-const getBasePath = () => {
-    return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        ? ''
-        : '/herald';
-};
-```
-
-**Recommendation**: Use environment variable or detect from current URL path
+### 2. Hardcoded Base Path ✅ FIXED
+**Location**: `app/utils/__init__.py`, `app/templates/base.html`, `app/static/js/store/gameStore.js`, board/lobby templates
+**Status**: Base path is now configurable. Server sets `window.HERALD_BASE_PATH` from request (or `BASE_PATH` env). Frontend uses it everywhere; no hardcoded `/herald`.
+**Usage**: Set `BASE_PATH=/herald` (or your subpath) in production if not using ASGI `root_path`.
 
 ### 3. Database Migration Automation ✅ FIXED
 **Location**: `app/main.py:209-260`, `deploy/run_pending_migrations.py`
@@ -43,15 +32,13 @@ const getBasePath = () => {
 **Current**: Works but could be clearer
 **Status**: Actually safe - empty join returns empty string, which is fine
 
-### 5. Alert() Usage for Errors
-**Location**: Multiple places in `board.html`
-**Issue**: Using `alert()` for error messages is not ideal UX
-**Recommendation**: Consider using toast notifications or inline error messages
+### 5. Alert() Usage for Errors ✅ FIXED
+**Location**: `app/game/templates/game/board.html`
+**Status**: Replaced all `alert()` with toast notifications (error/success/info). Toasts auto-dismiss after 5s and can be dismissed manually.
 
-### 6. No Rate Limiting on Clear Events
-**Location**: `app/api/games.py:1678`
-**Issue**: Clear events endpoint could be spammed
-**Recommendation**: Add rate limiting or require confirmation token
+### 6. No Rate Limiting on Clear Events ✅ FIXED
+**Location**: `app/api/games.py`, `app/utils/rate_limit.py`
+**Status**: Rate limiting added: clear_events (5/min per game), import_army (10/min per game). Returns 429 when exceeded.
 
 ### 7. Missing Null Check in getAttachedHeroesForUnit
 **Location**: `app/game/templates/game/board.html:1820-1823`
@@ -83,11 +70,10 @@ const getBasePath = () => {
 ## Recommendations
 
 1. **Before Deploy**: Ensure `deploy/` directory is mounted or migration scripts are copied to container
-2. **Before Deploy**: Test base path detection in production environment  
-3. **Post-Deploy**: Monitor for migration logs on startup (should see "Migrations completed successfully" or "All migrations are up to date")
-4. **Future**: Replace alert() with better UX patterns
-5. **Future**: Add rate limiting to destructive operations
-6. **Future**: Consider adding authorization check to clear events endpoint (low priority)
+2. **Before Deploy**: Set `BASE_PATH` if app is served under a subpath (e.g. `BASE_PATH=/herald`).
+3. **Post-Deploy**: Monitor for migration logs on startup (should see "Migrations completed successfully" or "All migrations are up to date").
+4. **CI**: Pytest runs before deploy (see `.github/workflows/deploy.yml`).
+5. **Future**: Consider adding authorization check to clear events endpoint (low priority).
 
 ## Test Coverage
 

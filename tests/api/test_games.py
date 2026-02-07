@@ -110,7 +110,7 @@ async def test_player_join_broadcasts(client):
     )
     code = resp.json()["code"]
 
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()) as mock_broadcast:
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()) as mock_broadcast:
         resp_join = await client.post(
             f"/api/games/{code}/join",
             json={"player_name": "Joiner", "player_color": "#123123"},
@@ -978,7 +978,7 @@ async def test_clear_all_units_success(client):
     assert len(units) == 2
     
     # Clear all units
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()) as mock_broadcast:
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()) as mock_broadcast:
         resp_clear = await client.delete(f"/api/games/{code}/players/{host_id}/units")
         assert resp_clear.status_code == 200
         data = resp_clear.json()
@@ -1091,7 +1091,7 @@ async def test_clear_all_units_with_no_units(client):
     )
     
     # Clear units when player has none
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
         resp_clear = await client.delete(f"/api/games/{code}/players/{host_id}/units")
         assert resp_clear.status_code == 200
         data = resp_clear.json()
@@ -1150,7 +1150,7 @@ async def test_log_unit_action_rush(client):
     await client.post(f"/api/games/{code}/start")
     
     # Log a rush action
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
         resp_action = await client.post(
             f"/api/games/{code}/units/{unit_id}/actions",
             json={"action": "rush"},
@@ -1229,7 +1229,7 @@ async def test_log_unit_action_charge_with_targets(client):
     await client.post(f"/api/games/{code}/start")
     
     # Log a charge action with target
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
         resp_action = await client.post(
             f"/api/games/{code}/units/{unit1_id}/actions",
             json={"action": "charge", "target_unit_ids": [unit2_id]},
@@ -1470,7 +1470,7 @@ async def test_clear_events(client):
     assert len(events_before) > 0
     
     # Clear events
-    with patch("app.api.games.broadcast_to_game", new=AsyncMock()):
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
         resp_clear = await client.delete(f"/api/games/{code}/events")
         assert resp_clear.status_code == 200
         data = resp_clear.json()
