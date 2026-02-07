@@ -18,26 +18,62 @@
 .objective-marker { transition: all 0.2s ease; cursor: pointer; }
 .objective-marker:hover { transform: scale(1.1); }
 
-.player-column { min-height: 200px; }
+/* Allow flex children to shrink so overflow-y-auto creates scroll; vertical only */
+.player-column {
+    min-height: 0; /* flex shrink for scroll */
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.center-panel {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Let center content grow so the panel can scroll; game log has min height */
+.center-panel > * {
+    flex-shrink: 0;
+}
+
+.center-panel .game-log {
+    flex: 1 1 auto;
+    min-height: 14rem;
+}
+
+.game-log-content {
+    min-height: 0; /* flex child scroll */
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
 
 /* Mobile-first responsive styles */
 @media (max-width: 768px) {
     .game-layout {
         flex-direction: column !important;
+        overflow: hidden;
+        min-height: 0;
     }
     
     .player-column {
         border-right: none !important;
         border-left: none !important;
         border-bottom: 1px solid hsl(var(--b3));
-        max-height: 40vh;
+        max-height: 35vh;
+        min-height: 120px;
         overflow-y: auto;
+        flex: 0 0 auto !important;
     }
     
     .center-panel {
         width: 100% !important;
         order: -1; /* Move center panel to top on mobile */
-        max-height: none;
+        max-height: 45vh;
+        min-height: 160px;
+        overflow-y: auto !important; /* scroll whole center panel on mobile */
         flex: 0 0 auto !important;
     }
     
@@ -46,7 +82,7 @@
     }
     
     .center-panel .game-log {
-        max-height: 150px;
+        max-height: none; /* let outer center-panel scroll control it */
     }
     
     .objective-marker {
@@ -148,7 +184,7 @@
     </div>
     
     <!-- Game Board -->
-    <div v-else class="flex flex-col h-screen">
+    <div v-else class="flex flex-col h-screen overflow-x-hidden">
         
         <!-- Top Bar -->
         <header class="navbar bg-base-100 shadow-lg px-4">
@@ -459,7 +495,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
+                    <div class="game-log-content flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
                         <div 
                             v-for="event in events"
                             :key="event.id"
