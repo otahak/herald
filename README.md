@@ -22,7 +22,7 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - **Solo Play Mode**: Play games solo with an "Opponent" player; game state persistence with save/load
 - **Game Expiration**: Multiplayer games expire after 1 hour of inactivity; solo games expire after 30 days
 - **Automated Migrations**: Database migrations run automatically on application startup
-- Responsive/mobile-friendly UI
+- **Responsive/mobile-friendly UI**: Game board panels (player unit lists, center controls and log) are vertically scrollable on small screens; horizontal scrolling is disabled so layout stays contained
 
 ## Architecture
 - Backend: Python 3.12+, Litestar, SQLAlchemy (advanced-alchemy), Postgres (asyncpg). Entry `app/main.py`; routes in `app/routes.py`.

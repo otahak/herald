@@ -14,7 +14,7 @@ uv run pytest --cov=app --cov=tests/api --cov-report=term-missing
 - **Config**: `tests/conftest.py` uses SQLite and ASGITransport; no live DB or server required.
 - **CI**: `.github/workflows/deploy.yml` runs `uv run pytest tests/api` before deploy; deploy job depends on test job.
 
-Covered areas include: game CRUD, join/start, manual units (including rules/loadout/upgrades), unit actions, event log export/clear, clear-events rate limiting (429 on 6th call per game per minute).
+Covered areas include: game CRUD, join/start, manual units (including rules/loadout/upgrades), unit actions, event log export/clear, clear-events rate limiting (429 on 6th call per game per minute). Board layout and scroll behavior (e.g. panel scrolling) are not covered by API tests; verify manually or via E2E as needed.
 
 ## E2E (Playwright)
 
