@@ -1557,3 +1557,74 @@ async def test_clear_events_rate_limited(client):
     assert r6.status_code == 429
     assert "detail" in r6.json() or "Too many" in r6.text
 
+
+@pytest.mark.asyncio
+async def test_solo_create_with_opponent_name(client):
+    """Create solo game with opponent_name sets the opponent's initial name."""
+    resp = await client.post(
+        "/api/games",
+        json={
+            "name": "SoloCustom",
+            "player_name": "Host",
+            "player_color": "#111111",
+            "is_solo": True,
+            "opponent_name": "The Enemy",
+        },
+    )
+    assert resp.status_code == 201
+    players = resp.json()["players"]
+    assert len(players) == 2
+    opponent = next(p for p in players if not p.get("is_host"))
+    assert opponent["name"] == "The Enemy"
+
+
+@pytest.mark.asyncio
+async def test_solo_rename_opponent(client):
+    """In solo mode, opponent player name can be updated via PATCH."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "SoloRename", "player_name": "Host", "player_color": "#111111", "is_solo": True},
+    )
+    assert resp.status_code == 201
+    code = resp.json()["code"]
+    players = resp.json()["players"]
+    assert len(players) == 2
+    opponent = next(p for p in players if not p.get("is_host"))
+    assert opponent["name"] == "Opponent"
+    opponent_id = opponent["id"]
+    patch_resp = await client.patch(
+        f"/api/games/{code}/players/{opponent_id}",
+        json={"name": "The Enemy"},
+    )
+    assert patch_resp.status_code == 200
+    data = patch_resp.json()
+    assert data["name"] == "The Enemy"
+    get_resp = await client.get(f"/api/games/{code}")
+    assert get_resp.status_code == 200
+    updated_players = get_resp.json().get("players", [])
+    assert len(updated_players) == 2
+    opponent_after = next((p for p in updated_players if not p.get("is_host")), None)
+    assert opponent_after is not None
+    assert opponent_after["name"] == "The Enemy"
+
+
+@pytest.mark.asyncio
+async def test_rename_player_only_in_solo(client):
+    """PATCH player name returns 400/422 when game is not solo."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "TwoPlayer", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    r = await client.patch(
+        f"/api/games/{code}/players/{host_id}",
+        json={"name": "NewName"},
+    )
+    assert r.status_code in (400, 422)
+    assert "solo" in r.json().get("detail", "").lower()
+

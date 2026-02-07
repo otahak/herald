@@ -53,6 +53,15 @@ async def get_game_by_code(
     return game
 
 
+def _utc_dt(dt: Optional[datetime]) -> Optional[datetime]:
+    """Return dt as timezone-aware UTC for comparison."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def check_and_update_expiration(game: Game) -> bool:
     """
     Check if a game has expired based on its type and activity.
@@ -61,15 +70,16 @@ def check_and_update_expiration(game: Game) -> bool:
     if game.status == GameStatus.EXPIRED:
         return True
     now = datetime.now(timezone.utc)
-    if not game.last_activity_at:
+    last_at = _utc_dt(game.last_activity_at)
+    if not last_at:
         return False
     if game.is_solo:
-        if now - game.last_activity_at > timedelta(days=30):
+        if now - last_at > timedelta(days=30):
             game.status = GameStatus.EXPIRED
             return True
     else:
         all_disconnected = all(not p.is_connected for p in game.players) if game.players else True
-        if all_disconnected and now - game.last_activity_at > timedelta(hours=1):
+        if all_disconnected and now - last_at > timedelta(hours=1):
             game.status = GameStatus.EXPIRED
             return True
     return False

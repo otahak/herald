@@ -120,6 +120,19 @@
                 </label>
             </div>
             
+            <div v-if="createForm.isSolo" class="form-control">
+                <label class="label">
+                    <span class="label-text">Opponent Name</span>
+                </label>
+                <input 
+                    type="text" 
+                    v-model="createForm.opponentName"
+                    placeholder="Opponent"
+                    maxlength="50"
+                    class="input input-bordered"
+                />
+            </div>
+            
             <div class="card-actions justify-end mt-4">
                 <button 
                     class="btn btn-primary btn-block sm:btn-wide sm:btn-auto"
@@ -257,6 +270,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     playerName: '',
                     playerColor: '#3b82f6',
                     isSolo: false,
+                    opponentName: '',
                 },
                 
                 joinForm: {
@@ -274,6 +288,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     { name: 'Cyan', value: '#06b6d4' },
                 ],
             };
+        },
+        
+        watch: {
+            'createForm.isSolo'(val) {
+                if (!val) this.createForm.opponentName = '';
+            },
         },
         
         computed: {
@@ -303,7 +323,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         this.createForm.gameName || 'New Game',
                         this.createForm.playerName,
                         this.createForm.playerColor,
-                        this.createForm.isSolo
+                        this.createForm.isSolo,
+                        this.createForm.isSolo ? (this.createForm.opponentName || undefined) : undefined
                     );
                     
                     // Save player identity to localStorage (persistent)

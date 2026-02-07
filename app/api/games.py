@@ -40,6 +40,7 @@ from app.api.game_schemas import (
     UpdateObjectiveRequest,
     CreateObjectivesRequest,
     UpdateVictoryPointsRequest,
+    UpdatePlayerNameRequest,
     UpdateRoundRequest,
     CreateUnitRequest,
     ClearUnitsResponse,
@@ -112,9 +113,10 @@ class GamesController(Controller):
             
             # For solo mode, automatically create an opponent player
             if data.is_solo:
+                opponent_display_name = (data.opponent_name or "Opponent").strip() or "Opponent"
                 opponent = Player(
                     game_id=game.id,
-                    name="Opponent",
+                    name=opponent_display_name,
                     color="#ef4444",  # Red, different from default blue
                     is_host=False,
                 )
@@ -1491,6 +1493,51 @@ class GamesController(Controller):
         })
         
         return PlayerResponse.model_validate(player)
+    
+    @patch("/{code:str}/players/{player_id:uuid}")
+    async def update_player_name(
+        self,
+        code: str,
+        player_id: uuid.UUID,
+        data: UpdatePlayerNameRequest,
+        session: AsyncSession,
+    ) -> PlayerResponse:
+        """Update a player's display name (solo mode only)."""
+        game = await get_game_by_code(session, code)
+        if not game.is_solo:
+            raise ValidationException("Renaming players is only allowed in solo play mode")
+        player = next((p for p in game.players if p.id == player_id), None)
+        if not player:
+            raise NotFoundException(f"Player {player_id} not found in game")
+        game.last_activity_at = datetime.now(timezone.utc)
+        new_name = data.name.strip()
+        await log_event(
+            session, game,
+            EventType.CUSTOM,
+            f"Renamed player to {new_name}",
+            player_id=player_id,
+        )
+        player.name = new_name
+        # Cache scalar fields and is_solo before commit to avoid lazy load after session commit
+        out_data = {
+            "id": player.id,
+            "name": new_name,
+            "color": player.color,
+            "is_host": player.is_host,
+            "is_connected": player.is_connected,
+            "army_name": player.army_name,
+            "starting_unit_count": player.starting_unit_count,
+            "starting_points": player.starting_points,
+            "victory_points": player.victory_points,
+        }
+        is_solo = game.is_solo
+        await session.commit()
+        if not is_solo:
+            await broadcast_to_game(code, {
+                "type": "state_update",
+                "data": {"reason": "player_renamed", "player_id": str(player_id), "name": new_name},
+            })
+        return PlayerResponse.model_validate(out_data)
     
     @patch("/{code:str}/round")
     async def update_round(
