@@ -7,12 +7,12 @@
 
 const GameStore = {
     /**
-     * Get base path for API calls (empty for localhost, /herald for production)
+     * Get base path for API calls. Set by server in base template (window.HERALD_BASE_PATH).
      */
     getBasePath() {
-        return (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-            ? ''
-            : '/herald';
+        return (typeof window !== 'undefined' && window.HERALD_BASE_PATH !== undefined)
+            ? window.HERALD_BASE_PATH
+            : '';
     },
     
     // Reactive state
@@ -778,10 +778,7 @@ const GameStore = {
             }
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Use /herald prefix only if we're on the production domain (not localhost)
-            const basePath = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-                ? '' 
-                : '/herald';
+            const basePath = GameStore.getBasePath();
             const wsUrl = `${protocol}//${window.location.host}${basePath}/ws/game/${code}`;
             
             const ws = new WebSocket(wsUrl);

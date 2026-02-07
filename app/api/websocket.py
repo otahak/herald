@@ -184,6 +184,7 @@ async def get_game_state(session: AsyncSession, code: str) -> Optional[dict]:
                 "has_ambush": unit.has_ambush,
                 "has_scout": unit.has_scout,
                 "attached_to_unit_id": str(unit.attached_to_unit_id) if unit.attached_to_unit_id else None,
+                "upgrades": unit.upgrades,
             }
             
             if unit.state:
@@ -268,7 +269,7 @@ async def game_websocket(
     - {"type": "error", "message": "..."}
     """
     # Check if game is in solo mode - skip WebSocket for solo games
-    from app.api.games import get_game_by_code
+    from app.api.game_helpers import get_game_by_code
     game = await get_game_by_code(session, code)
     if game.is_solo:
         await socket.close(code=1008, reason="Solo games do not use WebSocket")
