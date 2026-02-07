@@ -115,21 +115,25 @@ const GameStore = {
         /**
          * Create a new game
          */
-        async createGame(name, playerName, playerColor, isSolo = false) {
+        async createGame(name, playerName, playerColor, isSolo = false, opponentName = undefined) {
             GameStore.state.isLoading = true;
             GameStore.state.error = null;
             
             try {
                 const basePath = GameStore.getBasePath();
+                const payload = {
+                    name,
+                    player_name: playerName,
+                    player_color: playerColor,
+                    is_solo: isSolo,
+                };
+                if (isSolo && opponentName != null && String(opponentName).trim() !== '') {
+                    payload.opponent_name = String(opponentName).trim();
+                }
                 const response = await fetch(`${basePath}/api/games`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name,
-                        player_name: playerName,
-                        player_color: playerColor,
-                        is_solo: isSolo,
-                    }),
+                    body: JSON.stringify(payload),
                 });
                 
                 if (!response.ok) {

@@ -22,6 +22,7 @@ class CreateGameRequest(BaseModel):
     player_name: str = Field(max_length=50)
     player_color: str = Field(default="#3b82f6", max_length=20)
     is_solo: bool = Field(default=False, description="Enable solo play mode (single player controls both armies)")
+    opponent_name: Optional[str] = Field(default=None, max_length=50, description="Display name for the opponent in solo mode")
 
 
 class JoinGameRequest(BaseModel):
@@ -74,6 +75,11 @@ class CreateObjectivesRequest(BaseModel):
 class UpdateVictoryPointsRequest(BaseModel):
     """Request to update a player's victory points."""
     delta: int = Field(description="Change in VP (+1, -1, etc.)")
+
+
+class UpdatePlayerNameRequest(BaseModel):
+    """Request to update a player's display name (solo mode only)."""
+    name: str = Field(..., min_length=1, max_length=50, description="New display name")
 
 
 class UpdateRoundRequest(BaseModel):

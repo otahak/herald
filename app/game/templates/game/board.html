@@ -327,6 +327,28 @@
                     </div>
                 </div>
                 
+                <!-- Rename Opponent (Solo Mode Only) -->
+                <div v-if="game.is_solo && players.length > 1 && opponentPlayer" class="p-4 border-b border-base-300">
+                    <h3 class="font-bold mb-2">Opponent Name</h3>
+                    <div class="flex gap-2">
+                        <input
+                            type="text"
+                            v-model="opponentNameEdit"
+                            class="input input-sm input-bordered flex-1"
+                            placeholder="Opponent name"
+                            maxlength="50"
+                            :disabled="isExpired || isRenamingPlayer"
+                        />
+                        <button
+                            class="btn btn-sm btn-primary"
+                            :disabled="isExpired || isRenamingPlayer || !opponentNameEdit.trim() || opponentNameEdit.trim() === opponentPlayer.name"
+                            @click="updatePlayerName(opponentPlayer.id, opponentNameEdit.trim())"
+                        >
+                            [[ isRenamingPlayer ? 'Saving…' : 'Save' ]]
+                        </button>
+                    </div>
+                </div>
+                
                 <!-- Save/Load Controls (Solo Mode Only) -->
                 <div v-if="game.is_solo" class="p-4 border-b border-base-300">
                     <h3 class="font-bold mb-2">Save/Load</h3>
@@ -1946,6 +1968,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const rightPlayer = computed(() => {
                 return players.value.find(p => p.id && leftPlayer.value && p.id !== leftPlayer.value.id) || players.value[1] || null;
             });
+            const opponentPlayer = computed(() =>
+                players.value.find(p => p.id && p.id !== currentPlayerId.value) || null
+            );
             
             const armyForgeUrl = ref('');
             const isImporting = ref(false);
@@ -1971,6 +1996,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const selectedTargets = ref([]);
             const showClearLogModal = ref(false);
             const isClearingLog = ref(false);
+            const opponentNameEdit = ref('');
+            const isRenamingPlayer = ref(false);
             const toasts = ref([]);
             let toastTimeoutIds = {};
             const showToast = (message, type = 'error') => {
@@ -2231,6 +2258,35 @@ document.addEventListener("DOMContentLoaded", () => {
                     await store.actions.fetchEvents();
                 } catch (error) {
                     showToast('Failed to update round: ' + error.message);
+                }
+            };
+            
+            const updatePlayerName = async (playerId, newName) => {
+                try {
+                    const code = game.value?.code;
+                    if (!code || !newName) return;
+                    isRenamingPlayer.value = true;
+                    const basePath = getBasePath();
+                    const response = await fetch(`${basePath}/api/games/${code}/players/${playerId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: newName }),
+                    });
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.detail || 'Failed to rename player');
+                    }
+                    const updatedPlayer = await response.json();
+                    const index = players.value.findIndex(p => p.id === playerId);
+                    if (index !== -1) {
+                        players.value[index] = updatedPlayer;
+                    }
+                    await store.actions.fetchEvents();
+                    showToast('Opponent renamed to ' + newName, 'success');
+                } catch (error) {
+                    showToast('Failed to rename: ' + error.message);
+                } finally {
+                    isRenamingPlayer.value = false;
                 }
             };
             
@@ -2598,6 +2654,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 { immediate: true }
             );
             
+            // Keep opponent name input in sync with the opponent player (solo mode)
+            watch(
+                opponentPlayer,
+                (opp) => {
+                    opponentNameEdit.value = opp?.name ?? '';
+                },
+                { immediate: true }
+            );
+            
             const createObjectives = async () => {
                 try {
                     await store.actions.createObjectives(objectiveCount.value);
@@ -2918,6 +2983,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 showExpiredModal,
                 leftPlayer,
                 rightPlayer,
+                opponentPlayer,
+                opponentNameEdit,
+                isRenamingPlayer,
                 armyForgeUrl,
                 isImporting,
                 showManualUnitModal,
@@ -2969,6 +3037,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 getPlayerVP,
                 updateVP,
                 updateRound,
+                updatePlayerName,
                 updateUnit,
                 importArmy,
                 startGame,
