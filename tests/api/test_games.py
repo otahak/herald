@@ -1483,3 +1483,77 @@ async def test_clear_events(client):
     events_after = resp_events_after.json()
     assert len(events_after) == 0
 
+
+@pytest.mark.asyncio
+async def test_manual_unit_with_loadout_rules_upgrades(client):
+    """Create unit with loadout, rules, and upgrades; GET game returns them."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "UnitDetailsTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    create_payload = {
+        "player_id": host_id,
+        "name": "Veteran Squad",
+        "quality": 3,
+        "defense": 4,
+        "size": 5,
+        "tough": 1,
+        "cost": 250,
+        "rules": [{"name": "Tough", "rating": 2}, {"name": "Hero"}],
+        "loadout": [
+            {"name": "Rifle", "label": "Heavy Rifle", "range": 24, "attacks": 1},
+            {"name": "Plasma", "range": 12, "attacks": 1, "specialRules": [{"name": "AP", "rating": 2}]},
+        ],
+        "upgrades": [{"name": "Veteran"}, {"name": "Weapon Upgrade", "content": [{"name": "Plasma"}]}],
+    }
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp_unit = await client.post(f"/api/games/{code}/units/manual", json=create_payload)
+    assert resp_unit.status_code == 201
+    data = resp_unit.json()
+    assert data["name"] == "Veteran Squad"
+    assert data.get("rules") == create_payload["rules"]
+    assert data.get("loadout") == create_payload["loadout"]
+    assert data.get("upgrades") == create_payload["upgrades"]
+    # GET game includes unit with same data
+    resp_game = await client.get(f"/api/games/{code}")
+    assert resp_game.status_code == 200
+    units = resp_game.json().get("units", [])
+    unit = next((u for u in units if u["name"] == "Veteran Squad"), None)
+    assert unit is not None
+    assert unit.get("upgrades") == create_payload["upgrades"]
+
+
+@pytest.mark.asyncio
+async def test_clear_events_rate_limited(client):
+    """Clear events is rate-limited (5 per minute per game); 6th call returns 429."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "RateLimitTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join_resp.json()["players"][1]["id"]
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        for _ in range(2):
+            await client.post(
+                f"/api/games/{code}/units/manual",
+                json={"player_id": host_id, "name": "H", "quality": 4, "defense": 4, "size": 1, "tough": 1, "cost": 0},
+            )
+            await client.post(
+                f"/api/games/{code}/units/manual",
+                json={"player_id": guest_id, "name": "G", "quality": 4, "defense": 4, "size": 1, "tough": 1, "cost": 0},
+            )
+        await client.post(f"/api/games/{code}/start")
+        for _ in range(5):
+            r = await client.delete(f"/api/games/{code}/events")
+            assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+        r6 = await client.delete(f"/api/games/{code}/events")
+    assert r6.status_code == 429
+    assert "detail" in r6.json() or "Too many" in r6.text
+

@@ -9,15 +9,15 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - **Victory Points**: Manual +/- interface with log consolidation (removals delete corresponding "add" entries)
 - **Round Tracker**: Manual +/- interface for round tracking
 - **Time-based Wound Tracking**: Wounds removed within 30 seconds delete the log entry (quick corrections); wounds removed after 30 seconds log as heals
-- **Attached Units**: Heroes attached to parent units are visually grouped and controlled together; single activate button for combined units
+- **Attached Units**: Heroes attached to parent units are visually grouped and controlled together; single activate button for combined units; each unit (and attached hero) has expandable details (rules, loadout, upgrades)
 - **Unit Detachment**: Manual detachment of heroes from parent units; automatic detachment when parent is destroyed
 - **Shaken/Unshaken Logging**: All shaken state changes are logged with proper event tracking
 - **Unit Action Logging**: Log unit actions (Rush, Advance, Hold, Charge, Attack) with target selection for Charge/Attack actions
 - Action log: Automatic logging of all game state changes with human-readable descriptions
 - **Event Log Export**: Export game event log as markdown file
-- **Clear Event Log**: Clear all events from a game (with confirmation)
+- **Clear Event Log**: Clear all events from a game (with confirmation); rate-limited (5 per minute per game)
 - **Army Forge Import**: Import units from Army Forge share links (accumulates with existing units)
-- **Manual Unit Entry**: Add units one at a time via form modal
+- **Manual Unit Entry**: Add units via form with structured rules, loadout, and upgrades (or Advanced JSON override)
 - **Clear All Units**: Explicit button with confirmation to clear all units (only in lobby)
 - **Solo Play Mode**: Play games solo with an "Opponent" player; game state persistence with save/load
 - **Game Expiration**: Multiplayer games expire after 1 hour of inactivity; solo games expire after 30 days
@@ -97,13 +97,14 @@ For a 2GB/1vCPU droplet, the service runs 2 uvicorn workers and binds to localho
 uv run pytest tests/api
 uv run pytest --cov=app --cov=tests/api --cov-report=term-missing
 ```
-Notes: SQLite via `DATABASE_URL` override in `tests/conftest.py`; ASGITransport runs app in-process; lifecycle via `asgi-lifespan`.
+Notes: SQLite via `DATABASE_URL` override in `tests/conftest.py`; ASGITransport runs app in-process; lifecycle via `asgi-lifespan`. CI runs `uv run pytest tests/api` before deploy (see `.github/workflows/deploy.yml`).
 
 Test coverage includes:
 - Unit action logging (rush, advance, hold, charge, attack)
 - Target selection validation for charge/attack actions
-- Event log export functionality
-- Clear events functionality
+- Event log export and clear events
+- Manual unit creation with rules, loadout, and upgrades (response and GET game include upgrades)
+- Clear-events rate limiting (6th call in short window returns 429)
 
 ### End-to-End (Playwright)
 Requires server at `http://localhost:8000`.
@@ -118,7 +119,7 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - `POST /api/games/{code}/join` – join game
 - `POST /api/games/{code}/start` – start game
 - `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`) - **adds units** (does not clear existing)
-- `POST /api/games/{code}/units/manual` – create unit manually (`CreateUnitRequest`)
+- `POST /api/games/{code}/units/manual` – create unit manually (`CreateUnitRequest`: name, quality, defense, size, tough, cost; optional `rules`, `loadout`, `upgrades`; Advanced JSON overrides when provided)
 - `POST /api/games/{code}/units/{unit_id}/actions` – log unit action (`action`: rush/advance/hold/charge/attack, `target_unit_ids` optional for charge/attack)
 - `DELETE /api/games/{code}/players/{player_id}/units` – clear all units for a player (lobby only)
 - `DELETE /api/games/{code}/events` – clear all events for a game
@@ -139,9 +140,12 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - Board modal rules: empty slot → name entry; disconnected player → selection; both active → blocked.
 
 ## Army Management
-- **Army Forge Import**: Imports units from Army Forge share links. Units are **added** to existing units (does not clear existing units). Multiple imports accumulate.
-- **Manual Unit Entry**: Add units one at a time via the "Add Unit Manually" button in the lobby. Units accumulate with imported units.
+- **Army Forge Import**: Imports units from Army Forge share links. Units are **added** to existing units (does not clear existing units). Multiple imports accumulate. Rate-limited (10 imports per minute per game); excess returns 429.
+- **Manual Unit Entry**: Add units via the "Add Unit Manually" button in the lobby. Use structured fields: **Special rules** (name + rating), **Weapons/Equipment** (name, label, range, attacks, limited, special rules), and **Upgrades** (name, optional content). Advanced JSON can override when provided. Units accumulate with imported units.
 - **Clear All Units**: Use the "Clear All Units" button (only visible when player has units) to remove all units. Requires confirmation modal. Only available in lobby status. Resets player stats (unit count, points, army name).
+
+## Unit Details (Board)
+- **Expandable details**: Each unit card (and each attached hero) has a "Show/Hide details" section with **Rules** (badges), **Weapons/Equipment** (list), and **Upgrades** (human-readable; no raw JSON). Same formatting for imported and manually added units.
 
 ## Unit Actions
 - **Action Logging**: When activating a unit, select an action (Rush, Advance, Hold, Charge, or Attack)
@@ -152,7 +156,7 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 ## Event Log Management
 - **Event Log**: All game state changes are automatically logged with human-readable descriptions
 - **Export Log**: Export the entire event log as a markdown file for record-keeping
-- **Clear Log**: Clear all events from a game (requires confirmation). Useful for resetting the log mid-game.
+- **Clear Log**: Clear all events from a game (requires confirmation). Rate-limited to 5 clears per minute per game (429 when exceeded). Useful for resetting the log mid-game.
 
 ## Solo Play Mode
 - **Solo Games**: Create games with `is_solo: true` to play against yourself
@@ -178,7 +182,7 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - WebSockets are async-friendly; prioritize lean payloads and 1 worker per vCPU. Bandwidth/fan-out matter more than CPU for typical usage. Managed Postgres or a separate DB host helps avoid contention at higher loads.
 
 ## To-Do / Next Steps
-- Testing: increase backend coverage (edge cases, error paths), run Playwright E2E regularly, and add CI.
+- Testing: increase backend coverage (edge cases, error paths), run Playwright E2E regularly.
 - Stability: monitor WebSocket reliability and DB performance; add load tests for WebSocket fan-out and import flows.
 - Performance: consider Redis/shared room registry and load balancer for higher concurrency; evaluate managed Postgres as load grows.
 - UX/Polish: broaden playtests, refine mobile UX, and add clearer status/connection indicators.
