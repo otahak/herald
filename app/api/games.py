@@ -10,7 +10,7 @@ from typing import Optional, List, Any
 from litestar import Controller, get, post, patch, delete, status_codes
 from litestar.response import Response
 from litestar.exceptions import NotFoundException, ValidationException, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1610,8 +1610,12 @@ class GamesController(Controller):
         if not game.is_solo:
             raise ValidationException("Save/load is only available for solo games")
         
-        # Get full game state
+        # Get full game state (include units from all players, same as get_game)
         game_response = GameWithUnitsResponse.model_validate(game)
+        units = []
+        for p in game.players:
+            units.extend(p.units)
+        game_response.units = [UnitResponse.model_validate(u) for u in units]
         
         # Serialize to JSON
         game_state_json = json.dumps(game_response.model_dump(), default=str)
@@ -1625,11 +1629,9 @@ class GamesController(Controller):
         )
         session.add(game_save)
         await session.flush()
-        
         save_id = game_save.id
-        await session.commit()
         
-        # Log event
+        # Log event before commit (game object is still valid)
         await log_event(
             session, game,
             EventType.CUSTOM,
@@ -1694,7 +1696,113 @@ class GamesController(Controller):
         # Deserialize game state
         saved_state = json.loads(game_save.game_state_json)
         
-        # Log event
+        def _uuid(v):
+            if v is None:
+                return None
+            if isinstance(v, uuid.UUID):
+                return v
+            return uuid.UUID(str(v))
+        
+        # 1. Restore game-level fields
+        game.status = GameStatus(saved_state["status"])
+        game.current_round = int(saved_state["current_round"])
+        game.max_rounds = int(saved_state["max_rounds"])
+        game.current_player_id = _uuid(saved_state.get("current_player_id"))
+        game.first_player_next_round_id = _uuid(saved_state.get("first_player_next_round_id"))
+        
+        # 2. Restore player fields (same players, update stats)
+        player_by_id = {p.id: p for p in game.players}
+        for sp in saved_state.get("players", []):
+            pid = _uuid(sp.get("id"))
+            if pid and pid in player_by_id:
+                p = player_by_id[pid]
+                p.name = sp.get("name", p.name)
+                p.color = sp.get("color", p.color)
+                p.victory_points = int(sp.get("victory_points", 0))
+                p.starting_unit_count = int(sp.get("starting_unit_count", 0))
+                p.starting_points = int(sp.get("starting_points", 0))
+                p.army_name = sp.get("army_name") or None
+        
+        # 3. Delete existing units (and their states via cascade)
+        await session.execute(sql_delete(Unit).where(Unit.player_id.in_([p.id for p in game.players])))
+        await session.flush()
+        
+        # 4. Recreate units and states from save; map old unit id -> new unit for attachments
+        old_id_to_unit: dict[str, Unit] = {}
+        old_id_to_state: dict[str, UnitState] = {}
+        for su in saved_state.get("units", []):
+            new_unit = Unit(
+                player_id=_uuid(su["player_id"]),
+                name=su.get("name", "Unit"),
+                custom_name=su.get("custom_name"),
+                quality=int(su.get("quality", 4)),
+                defense=int(su.get("defense", 4)),
+                size=int(su.get("size", 1)),
+                tough=int(su.get("tough", 1)),
+                cost=int(su.get("cost", 0)),
+                loadout=su.get("loadout"),
+                rules=su.get("rules"),
+                upgrades=su.get("upgrades"),
+                is_hero=bool(su.get("is_hero", False)),
+                is_caster=bool(su.get("is_caster", False)),
+                caster_level=int(su.get("caster_level", 0)),
+                is_transport=bool(su.get("is_transport", False)),
+                transport_capacity=int(su.get("transport_capacity", 0)),
+                has_ambush=bool(su.get("has_ambush", False)),
+                has_scout=bool(su.get("has_scout", False)),
+                attached_to_unit_id=None,
+            )
+            session.add(new_unit)
+            await session.flush()
+            old_id_to_unit[str(su["id"])] = new_unit
+            
+            sstate = su.get("state")
+            if sstate is not None:
+                state = UnitState(
+                    unit_id=new_unit.id,
+                    wounds_taken=int(sstate.get("wounds_taken", 0)),
+                    models_remaining=int(sstate.get("models_remaining", new_unit.size)),
+                    activated_this_round=bool(sstate.get("activated_this_round", False)),
+                    is_shaken=bool(sstate.get("is_shaken", False)),
+                    is_fatigued=bool(sstate.get("is_fatigued", False)),
+                    deployment_status=DeploymentStatus(sstate.get("deployment_status", "deployed")),
+                    transport_id=None,  # set below after all units exist
+                    spell_tokens=int(sstate.get("spell_tokens", 0)),
+                    limited_weapons_used=sstate.get("limited_weapons_used"),
+                    custom_notes=sstate.get("custom_notes"),
+                )
+                session.add(state)
+                old_id_to_state[str(su["id"])] = state
+        await session.flush()
+        
+        # 5. Set attached_to_unit_id and transport_id (map old unit ids -> new)
+        for su in saved_state.get("units", []):
+            new_unit = old_id_to_unit.get(str(su["id"]))
+            if not new_unit:
+                continue
+            old_attached = su.get("attached_to_unit_id")
+            if old_attached:
+                new_parent = old_id_to_unit.get(str(old_attached))
+                if new_parent:
+                    new_unit.attached_to_unit_id = new_parent.id
+            sstate = su.get("state")
+            if sstate and sstate.get("transport_id"):
+                new_transport = old_id_to_unit.get(str(sstate["transport_id"]))
+                state = old_id_to_state.get(str(su["id"]))
+                if new_transport and state:
+                    state.transport_id = new_transport.id
+        await session.flush()
+        
+        # 6. Restore objectives
+        obj_by_id = {o.id: o for o in game.objectives}
+        for so in saved_state.get("objectives", []):
+            oid = _uuid(so.get("id"))
+            if oid and oid in obj_by_id:
+                o = obj_by_id[oid]
+                o.status = ObjectiveStatus(so.get("status", "neutral"))
+                o.controlled_by_id = _uuid(so.get("controlled_by_id"))
+        
+        # Log event and commit
         await log_event(
             session, game,
             EventType.CUSTOM,
@@ -1703,13 +1811,11 @@ class GamesController(Controller):
         )
         await session.commit()
         
-        # Return current game state (full restore would require more complex logic)
-        # For MVP, we'll just return the current state and note that full restore is a future enhancement
+        # Return restored state
         game = await get_game_by_code(session, code, load_attached_heroes=True)
         units = []
         for p in game.players:
             units.extend(p.units)
-        
         response = GameWithUnitsResponse.model_validate(game)
         response.units = [UnitResponse.model_validate(u) for u in units]
         return response
