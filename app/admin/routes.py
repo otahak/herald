@@ -40,4 +40,19 @@ async def admin_logout_get(request: Request) -> Redirect:
     return await admin_logout(request)
 
 
-routes = [admin_dashboard, admin_login_route, admin_callback_route, admin_logout_get, admin_login_page]
+@get("/admin/observe/{code:str}", guards=[require_admin_guard])
+async def admin_observe_game(request: Request, code: str) -> Template:
+    """Observe a game as read-only (admin only). No player identity; WebSocket receives updates without joining."""
+    from app.utils import get_base_path
+    base_path = get_base_path(request)
+    return Template(
+        template_name="game/board.html",
+        context={
+            "game_code": code.upper(),
+            "observer_mode": True,
+            "base_path": base_path,
+        },
+    )
+
+
+routes = [admin_dashboard, admin_login_route, admin_callback_route, admin_logout_get, admin_login_page, admin_observe_game]

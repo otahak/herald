@@ -792,8 +792,9 @@ const GameStore = {
                 GameStore.state.isConnected = true;
                 GameStore.state.reconnectAttempts = 0;
                 
-                // Join as player
-                if (GameStore.state.currentPlayerId) {
+                // Join as player (skip in observer mode so admin is not visible to players)
+                const isObserver = typeof window !== 'undefined' && window.HERALD_OBSERVER_MODE;
+                if (GameStore.state.currentPlayerId && !isObserver) {
                     ws.send(JSON.stringify({
                         type: 'join',
                         player_id: GameStore.state.currentPlayerId,
