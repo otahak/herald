@@ -233,8 +233,8 @@ class ProxyController(Controller):
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
                     raise ValidationException(
-                        f"Army Forge server error - the list may be invalid, expired, or Army Forge may be experiencing issues. "
-                        f"Try re-sharing your list from Army Forge."
+                        "Army Forge's export service doesn't support this list (e.g. custom/community army books). "
+                        "This is a limitation on Army Forge's side. Use an official list or add units manually."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException as e:
@@ -327,19 +327,16 @@ class ProxyController(Controller):
                     try:
                         error_body = e.response.json()
                         error_detail = error_body.get("error", error_body.get("message", str(error_body)))
-                    except:
+                    except Exception:
                         error_text = e.response.text[:200] if e.response.text else "No error details"
                         error_detail = error_text
                     
                     logger.error(f"Army Forge 500 error details: {error_detail}")
                     raise ValidationException(
-                        f"Army Forge server error (500) for list '{list_id}'. "
-                        f"This may happen with custom armies or expired lists. "
-                        f"Please try:\n"
-                        f"1. Re-sharing the list from Army Forge\n"
-                        f"2. Verifying the list ID is correct\n"
-                        f"3. Using a different army list\n\n"
-                        f"Error details: {error_detail[:100]}"
+                        "Army Forge's export service doesn't support this list. "
+                        "Lists built from custom or community army books often fail here—this is a limitation on Army Forge's side, not something we can fix in Herald. "
+                        "Please use a list from an official army book, or add units manually. "
+                        "You can re-share the list from Army Forge or try another list; if the problem persists, the list type is likely unsupported by their export API."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException:
@@ -441,6 +438,13 @@ class ProxyController(Controller):
                 logger.debug(f"Linked {attached_unit.name} to {parent_unit.name}")
             else:
                 logger.warning(f"Could not find parent unit with selectionId '{join_to_selection_id}' for attached unit '{attached_unit.name}'")
+        
+        # Use Army Forge list total when available (includes upgrades); unit cost is base-only
+        list_points = army_data.get("listPoints")
+        if list_points is not None and isinstance(list_points, (int, float)) and list_points >= 0:
+            total_points = int(list_points)
+            logger.debug(f"Using listPoints from API: {total_points}")
+        # else: total_points remains sum of unit costs (fallback for older or non-standard payloads)
         
         # Store values for response before any commits
         player_name = player.name

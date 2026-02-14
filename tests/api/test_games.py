@@ -1628,3 +1628,24 @@ async def test_rename_player_only_in_solo(client):
     assert r.status_code in (400, 422)
     assert "solo" in r.json().get("detail", "").lower()
 
+
+# --- Game board route (HTML): admin redirect ---
+
+
+@pytest.mark.asyncio
+async def test_game_board_redirects_admin_to_observe(client):
+    """When an admin visits /game/{code}, they are redirected to /admin/observe/{code}."""
+    with patch("app.game.routes.is_admin_authenticated", new=AsyncMock(return_value=True)):
+        resp = await client.get("/game/ABCD", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "admin/observe/ABCD" in resp.headers.get("location", "")
+
+
+@pytest.mark.asyncio
+async def test_game_board_returns_template_for_non_admin(client):
+    """When a non-admin visits /game/{code}, they get the game board template (200)."""
+    with patch("app.game.routes.is_admin_authenticated", new=AsyncMock(return_value=False)):
+        resp = await client.get("/game/XYZZ", follow_redirects=False)
+    assert resp.status_code == 200
+    assert "game_code" in resp.text or "XYZZ" in resp.text
+

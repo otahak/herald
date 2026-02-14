@@ -281,7 +281,10 @@ async def game_websocket(
     room = room_manager.get_room(code)
     player_id: Optional[uuid.UUID] = None
     
-    # Add to anonymous connections immediately so we receive broadcasts
+    # Add to anonymous connections immediately so we receive broadcasts.
+    # Observers (admin or anyone who never sends "join") stay here; they do not count toward
+    # the 2 player slots (multiplayer) or 1 slot (solo). Only clients that send "join" with
+    # a valid player_id are moved to room.connections and affect is_connected / player list.
     room.add_anonymous_connection(socket)
     logger.info(f"WebSocket connected to game {code} (anonymous)")
     

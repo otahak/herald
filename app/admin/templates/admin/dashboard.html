@@ -91,6 +91,28 @@
                 <div class="stat-value">[[ stats.games_last_7d ]]</div>
                 <div class="stat-desc">Created this week</div>
             </div>
+            
+            <!-- Observe game (read-only; you are not visible to players) -->
+            <div class="stat bg-base-200 rounded-lg shadow col-span-full md:col-span-2">
+                <div class="stat-title">Observe a game</div>
+                <div class="stat-desc mb-2">Enter a game code to watch in read-only. You will not appear to players.</div>
+                <div class="flex gap-2 items-center flex-wrap">
+                    <input 
+                        type="text" 
+                        v-model="observeGameCode" 
+                        class="input input-sm input-bordered w-32 font-mono" 
+                        placeholder="e.g. ABCD"
+                        maxlength="10"
+                    />
+                    <a 
+                        :href="observeGameCode ? (basePath + '/admin/observe/' + observeGameCode.toUpperCase().trim()) : '#'"
+                        class="btn btn-sm btn-primary"
+                        :class="{ 'btn-disabled': !observeGameCode || !observeGameCode.trim() }"
+                    >
+                        Observe
+                    </a>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -200,7 +222,7 @@
                         </td>
                         <td>[[ event.description ]]</td>
                         <td>
-                            <a v-if="event.game_code" :href="'/game/' + event.game_code" class="link link-primary">
+                            <a v-if="event.game_code" :href="basePath + '/admin/observe/' + event.game_code" class="link link-primary">
                                 [[ event.game_code ]]
                             </a>
                             <span v-else class="text-base-content/50">-</span>
@@ -227,7 +249,8 @@ const app = createApp({
             stats: null,
             feedbackList: [],
             eventsList: [],
-            showUnreadOnly: false
+            showUnreadOnly: false,
+            observeGameCode: ''
         };
     },
     mounted() {

@@ -277,6 +277,24 @@ async def admin_logout(request: Request) -> Redirect:
     return response
 
 
+async def is_admin_authenticated(request: Request) -> bool:
+    """Return True if the request has a valid admin session (no exception). Used to redirect admins to observer mode."""
+    session_id = request.cookies.get("session_id")
+    if not session_id:
+        return False
+    authenticated = await session_store.get(f"{ADMIN_SESSION_KEY}:{session_id}")
+    if not authenticated:
+        return False
+    email_raw = await session_store.get(f"{ADMIN_EMAIL_KEY}:{session_id}")
+    if not email_raw:
+        return False
+    if isinstance(email_raw, bytes):
+        email = email_raw.decode("utf-8")
+    else:
+        email = str(email_raw)
+    return email == GOOGLE_AUTHORIZED_EMAIL
+
+
 async def require_admin_guard(connection: ASGIConnection, handler: BaseRouteHandler) -> None:
     """Guard to require admin authentication."""
     # ASGIConnection has cookies, url, etc. directly accessible

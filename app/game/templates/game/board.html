@@ -186,6 +186,11 @@
     <!-- Game Board -->
     <div v-else class="flex flex-col h-screen overflow-x-hidden">
         
+        <!-- Observer banner (admin only; not visible to players) -->
+        <div v-if="observerMode" class="bg-info/20 text-info px-4 py-2 text-center text-sm font-medium border-b border-info/30">
+            Observing (read-only). You are not visible to players.
+        </div>
+        
         <!-- Top Bar -->
         <header class="navbar bg-base-100 shadow-lg px-4">
             <div class="flex-1">
@@ -262,39 +267,47 @@
                     <div class="flex justify-around gap-2">
                         <div v-if="leftPlayer" class="flex items-center gap-1">
                             <span :style="{ color: leftPlayer.color }">[[ leftPlayer.name ]]:</span>
-                            <button 
-                                class="btn btn-xs btn-circle btn-ghost"
-                                @click="updateVP(leftPlayer.id, -1)"
-                                :disabled="isExpired || leftPlayer.victory_points <= 0"
-                            >
-                                -
-                            </button>
+                            <template v-if="!observerMode">
+                                <button 
+                                    class="btn btn-xs btn-circle btn-ghost"
+                                    @click="updateVP(leftPlayer.id, -1)"
+                                    :disabled="isExpired || leftPlayer.victory_points <= 0"
+                                >
+                                    -
+                                </button>
+                            </template>
                             <span class="font-bold min-w-[2rem] text-center">[[ leftPlayer.victory_points ]]</span>
-                            <button 
-                                class="btn btn-xs btn-circle btn-ghost"
-                                @click="updateVP(leftPlayer.id, 1)"
-                                :disabled="isExpired"
-                            >
-                                +
-                            </button>
+                            <template v-if="!observerMode">
+                                <button 
+                                    class="btn btn-xs btn-circle btn-ghost"
+                                    @click="updateVP(leftPlayer.id, 1)"
+                                    :disabled="isExpired"
+                                >
+                                    +
+                                </button>
+                            </template>
                         </div>
                         <div v-if="rightPlayer" class="flex items-center gap-1">
                             <span :style="{ color: rightPlayer.color }">[[ rightPlayer.name ]]:</span>
-                            <button 
-                                class="btn btn-xs btn-circle btn-ghost"
-                                @click="updateVP(rightPlayer.id, -1)"
-                                :disabled="isExpired || rightPlayer.victory_points <= 0"
-                            >
-                                -
-                            </button>
+                            <template v-if="!observerMode">
+                                <button 
+                                    class="btn btn-xs btn-circle btn-ghost"
+                                    @click="updateVP(rightPlayer.id, -1)"
+                                    :disabled="isExpired || rightPlayer.victory_points <= 0"
+                                >
+                                    -
+                                </button>
+                            </template>
                             <span class="font-bold min-w-[2rem] text-center">[[ rightPlayer.victory_points ]]</span>
-                            <button 
-                                class="btn btn-xs btn-circle btn-ghost"
-                                @click="updateVP(rightPlayer.id, 1)"
-                                :disabled="isExpired"
-                            >
-                                +
-                            </button>
+                            <template v-if="!observerMode">
+                                <button 
+                                    class="btn btn-xs btn-circle btn-ghost"
+                                    @click="updateVP(rightPlayer.id, 1)"
+                                    :disabled="isExpired"
+                                >
+                                    +
+                                </button>
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -374,6 +387,7 @@
                     <h3 class="font-bold mb-2">Round</h3>
                     <div class="flex items-center justify-center gap-2">
                         <button 
+                            v-if="!observerMode"
                             class="btn btn-xs btn-circle btn-ghost"
                             @click="updateRound(-1)"
                             :disabled="isExpired || game.current_round <= 1"
@@ -382,6 +396,7 @@
                         </button>
                         <span class="font-bold min-w-[3rem] text-center">[[ game.current_round ]]</span>
                         <button 
+                            v-if="!observerMode"
                             class="btn btn-xs btn-circle btn-ghost"
                             @click="updateRound(1)"
                             :disabled="isExpired"
@@ -392,7 +407,7 @@
                 </div>
                 
                 <!-- Turn Controls -->
-                <div class="p-4 border-b border-base-300" v-if="game.status === 'in_progress'">
+                <div class="p-4 border-b border-base-300" v-if="!observerMode && game.status === 'in_progress'">
                     <h3 class="font-bold mb-2">Turn Controls</h3>
                     <div class="space-y-2">
                         <button 
@@ -413,7 +428,7 @@
                 </div>
                 
                 <!-- Lobby Controls (before game starts) -->
-                <div class="p-4 border-b border-base-300" v-if="game.status === 'lobby'">
+                <div class="p-4 border-b border-base-300" v-if="!observerMode && game.status === 'lobby'">
                     <h3 class="font-bold mb-2">Game Setup</h3>
                     
                     <!-- Player Selector (Solo Mode Only) -->
@@ -444,6 +459,7 @@
                             placeholder="Paste share link..."
                             class="input input-sm input-bordered"
                         />
+                        <p class="text-xs text-base-content/60 mt-1">Official army lists only. Custom/community lists are not supported by Army Forge's export—use manual entry if needed.</p>
                     </div>
                     <button 
                         class="btn btn-sm btn-block mb-2"
@@ -499,7 +515,7 @@
                 <div class="game-log flex-1 overflow-hidden flex flex-col">
                     <div class="p-2 border-b border-base-300 flex justify-between items-center">
                         <h3 class="font-bold text-sm">Game Log</h3>
-                        <div class="flex gap-2">
+                        <div v-if="!observerMode" class="flex gap-2">
                             <button 
                                 class="btn btn-xs btn-ghost"
                                 @click="exportEventLog"
@@ -1612,6 +1628,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const { createApp, ref, computed, reactive, onMounted, onUnmounted, watch } = Vue;
     
     const GAME_CODE = "{{ game_code }}";
+    const OBSERVER_MODE = {{ 'true' if observer_mode else 'false' }};
+    if (typeof window !== 'undefined') window.HERALD_OBSERVER_MODE = OBSERVER_MODE;
     
     // Unit Card Component
     const UnitCard = {
@@ -2772,6 +2790,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 const urlParams = new URLSearchParams(window.location.search);
                 const queryPlayerId = urlParams.get('playerId');
                 
+                // Observer mode (admin): fetch and watch only; no player identity, no join
+                if (OBSERVER_MODE) {
+                    await store.actions.fetchGame(GAME_CODE);
+                    await store.actions.fetchEvents();
+                    if (!store.state.game?.is_solo) {
+                        store.actions.connectWebSocket(GAME_CODE);
+                    }
+                    showPlayerSelect.value = false;
+                    return;
+                }
+                
                 // Fetch game state first
                 await store.actions.fetchGame(GAME_CODE);
                 await store.actions.fetchEvents();
@@ -2970,6 +2999,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             return {
                 // State
+                observerMode: OBSERVER_MODE,
                 game,
                 players,
                 units,
