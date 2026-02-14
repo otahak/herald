@@ -442,6 +442,13 @@ class ProxyController(Controller):
             else:
                 logger.warning(f"Could not find parent unit with selectionId '{join_to_selection_id}' for attached unit '{attached_unit.name}'")
         
+        # Use Army Forge list total when available (includes upgrades); unit cost is base-only
+        list_points = army_data.get("listPoints")
+        if list_points is not None and isinstance(list_points, (int, float)) and list_points >= 0:
+            total_points = int(list_points)
+            logger.debug(f"Using listPoints from API: {total_points}")
+        # else: total_points remains sum of unit costs (fallback for older or non-standard payloads)
+        
         # Store values for response before any commits
         player_name = player.name
         player_id = player.id
