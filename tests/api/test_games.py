@@ -1629,6 +1629,64 @@ async def test_rename_player_only_in_solo(client):
     assert "solo" in r.json().get("detail", "").lower()
 
 
+# --- Save / load (solo) ---
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_restores_state(client):
+    """Save stores full state; load restores game, players, units, and unit states."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "SaveLoad", "player_name": "Me", "player_color": "#111111", "is_solo": True},
+    )
+    assert resp.status_code == 201
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    # Add a unit and advance round
+    await client.post(
+        f"/api/games/{code}/units/manual",
+        json={
+            "player_id": host_id,
+            "name": "Test Unit",
+            "quality": 4,
+            "defense": 4,
+            "size": 1,
+            "tough": 1,
+            "cost": 50,
+        },
+    )
+    await client.patch(f"/api/games/{code}/round", json={"delta": 1})
+    # Save
+    save_resp = await client.post(
+        f"/api/games/{code}/save",
+        json={"save_name": "Checkpoint", "description": "After round 2"},
+    )
+    assert save_resp.status_code == 201
+    save_id = save_resp.json()["save_id"]
+    # Change state (round and unit wound) so we can verify restore
+    await client.patch(f"/api/games/{code}/round", json={"delta": 1})
+    get_before = await client.get(f"/api/games/{code}")
+    units_before = {u["id"]: u for u in get_before.json()["units"]}
+    # Apply a wound to the first unit
+    unit_id = next(iter(units_before))
+    await client.patch(
+        f"/api/games/{code}/units/{unit_id}",
+        json={"wounds_taken": 1},
+    )
+    # Load save
+    load_resp = await client.post(
+        f"/api/games/{code}/load",
+        json={"save_id": save_id},
+    )
+    assert load_resp.status_code == 200
+    loaded = load_resp.json()
+    # Restored round should be 2 (what we had at save time), not 3
+    assert loaded["current_round"] == 2
+    # Restored unit should have 0 wounds (saved state), not 1
+    assert len(loaded["units"]) == 1
+    assert loaded["units"][0]["state"]["wounds_taken"] == 0
+
+
 # --- Game board route (HTML): admin redirect ---
 
 
