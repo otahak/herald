@@ -467,7 +467,9 @@ class ProxyController(Controller):
         
         # First pass: Create all units and build a mapping of selectionId -> unit
         selection_id_to_unit: dict[str, Unit] = {}
+        unit_id_to_state: dict[uuid.UUID, UnitState] = {}
         unit_data_with_attachments: list[tuple[dict, Unit]] = []
+        unit_data_combined: list[tuple[dict, Unit]] = []
         
         for unit_data in units_data:
             try:
@@ -525,7 +527,10 @@ class ProxyController(Controller):
                 
                 # Store units with joinToUnit for second pass
                 if unit_data.get("joinToUnit"):
-                    unit_data_with_attachments.append((unit_data, unit))
+                    if unit_data.get("combined") and not props["is_hero"]:
+                        unit_data_combined.append((unit_data, unit))
+                    else:
+                        unit_data_with_attachments.append((unit_data, unit))
                 
                 # Create initial state
                 initial_deployment = (
@@ -547,6 +552,7 @@ class ProxyController(Controller):
                     custom_notes=unit_notes,
                 )
                 session.add(state)
+                unit_id_to_state[unit.id] = state
                 
                 total_points += unit.cost
             except Exception as e:
@@ -562,15 +568,43 @@ class ProxyController(Controller):
                 raise ValidationException(f"Failed to import unit '{unit_data.get('name', 'Unknown')}': {str(e)}")
             units_created += 1
         
-        # Second pass: Link attached heroes to their parent units
+        # Second pass A: Merge combined units into their parent (doubled squad size)
+        for unit_data, combined_unit in unit_data_combined:
+            join_to_selection_id = unit_data.get("joinToUnit")
+            if join_to_selection_id and join_to_selection_id in selection_id_to_unit:
+                parent_unit = selection_id_to_unit[join_to_selection_id]
+                parent_unit.size += combined_unit.size
+                parent_unit.cost += combined_unit.cost
+                parent_state = unit_id_to_state.get(parent_unit.id)
+                if parent_state:
+                    parent_state.models_remaining = parent_unit.size
+                combined_state = unit_id_to_state.pop(combined_unit.id, None)
+                if combined_state:
+                    await session.delete(combined_state)
+                await session.delete(combined_unit)
+                units_created -= 1
+                logger.debug(
+                    f"Merged combined unit {combined_unit.name} into {parent_unit.name} "
+                    f"(new size: {parent_unit.size})"
+                )
+            else:
+                logger.warning(
+                    f"Could not find parent unit with selectionId '{join_to_selection_id}' "
+                    f"for combined unit '{combined_unit.name}' — keeping as separate unit"
+                )
+
+        # Second pass B: Link attached heroes to their parent units
         for unit_data, attached_unit in unit_data_with_attachments:
             join_to_selection_id = unit_data.get("joinToUnit")
             if join_to_selection_id and join_to_selection_id in selection_id_to_unit:
                 parent_unit = selection_id_to_unit[join_to_selection_id]
                 attached_unit.attached_to_unit_id = parent_unit.id
-                logger.debug(f"Linked {attached_unit.name} to {parent_unit.name}")
+                logger.debug(f"Linked hero {attached_unit.name} to {parent_unit.name}")
             else:
-                logger.warning(f"Could not find parent unit with selectionId '{join_to_selection_id}' for attached unit '{attached_unit.name}'")
+                logger.warning(
+                    f"Could not find parent unit with selectionId '{join_to_selection_id}' "
+                    f"for attached unit '{attached_unit.name}'"
+                )
         
         # Use Army Forge list total when available (includes upgrades); unit cost is base-only
         list_points = army_data.get("listPoints")
