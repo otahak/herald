@@ -74,6 +74,11 @@ class CastSpellRequest(BaseModel):
     )
 
 
+class UpdateUnitProfileRequest(BaseModel):
+    """Request to edit a unit's profile fields (lobby only)."""
+    custom_name: Optional[str] = Field(default=None, max_length=100, description="Custom display name")
+
+
 class UpdateObjectiveRequest(BaseModel):
     """Request to update an objective's state."""
     status: ObjectiveStatus

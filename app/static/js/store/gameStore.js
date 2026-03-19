@@ -537,6 +537,47 @@ const GameStore = {
             }
         },
         
+        async deleteUnit(code, unitId) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}`, {
+                    method: 'DELETE',
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to delete unit');
+                }
+                GameStore.state.units = GameStore.state.units.filter(u => u.id !== unitId);
+                await this.fetchGame(code);
+                return true;
+            } catch (error) {
+                Debug.error('Delete unit failed:', error.message);
+                throw error;
+            }
+        },
+        
+        async renameUnit(code, unitId, customName) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/profile`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ custom_name: customName }),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to rename unit');
+                }
+                const updated = await response.json();
+                const index = GameStore.state.units.findIndex(u => u.id === unitId);
+                if (index !== -1) GameStore.state.units[index] = updated;
+                return updated;
+            } catch (error) {
+                Debug.error('Rename unit failed:', error.message);
+                throw error;
+            }
+        },
+        
         /**
          * Log a unit action (rush, advance, hold, charge, attack)
          */

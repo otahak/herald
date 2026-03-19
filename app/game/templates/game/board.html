@@ -214,17 +214,19 @@
             <!-- Left Column (local player if present) -->
             <div class="player-column flex-1 p-4 overflow-y-auto border-r border-base-200 md:border-r" :class="{ 'opacity-50 pointer-events-none': isExpired }">
                 <div v-if="leftPlayer" class="mb-4">
-                    <!-- Player Header -->
-                    <div class="flex items-center gap-2 mb-2">
+                    <!-- Player Header (collapsible) -->
+                    <div class="flex items-center gap-2 mb-2 cursor-pointer select-none" @click="toggleSection('leftArmy')">
                         <div 
                             class="w-4 h-4 rounded-full"
                             :style="{ backgroundColor: leftPlayer.color }"
                         ></div>
-                        <h2 class="text-lg font-bold">[[ leftPlayer.name ]]</h2>
+                        <h2 class="text-lg font-bold flex-1">[[ leftPlayer.name ]]</h2>
                         <span v-if="!leftPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
                         <span v-if="game.current_player_id === leftPlayer.id" class="badge badge-info badge-sm">Active</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.leftArmy ? '▶' : '▼' ]]</span>
                     </div>
                     
+                    <div v-show="!sectionCollapsed.leftArmy">
                     <!-- Army Health Bar -->
                     <div class="mb-4">
                         <div class="flex justify-between text-sm mb-1">
@@ -239,7 +241,7 @@
                             ></div>
                         </div>
                         <div v-if="isMoraleThreshold(leftPlayer.id)" class="text-warning text-xs mt-1">
-                            ⚠️ Morale Threshold Reached
+                            Morale Threshold Reached
                         </div>
                     </div>
                     
@@ -256,6 +258,25 @@
                             @open-cast-modal="openCastModal"
                         ></unit-card>
                     </div>
+                    
+                    <!-- Spells Reference -->
+                    <div v-if="getPlayerSpells(leftPlayer.id).length > 0" class="mt-4">
+                        <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('leftSpells')">
+                            <h3 class="font-bold text-sm">Spells</h3>
+                            <span class="badge badge-xs">[[ getPlayerSpells(leftPlayer.id).length ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.leftSpells ? '▶' : '▼' ]]</span>
+                        </div>
+                        <div v-show="!sectionCollapsed.leftSpells" class="space-y-1">
+                            <div v-for="spell in getPlayerSpells(leftPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
+                                <div class="flex justify-between items-start">
+                                    <span class="font-semibold">[[ spell.name ]]</span>
+                                    <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                </div>
+                                <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
                 </div>
             </div>
             
@@ -263,8 +284,12 @@
             <div class="center-panel w-80 bg-base-200 flex flex-col">
                 
                 <!-- Victory Points -->
-                <div class="objectives-section p-4 border-b border-base-300">
-                    <h3 class="font-bold mb-2">Victory Points</h3>
+                <div class="objectives-section border-b border-base-300">
+                    <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('vp')">
+                        <h3 class="font-bold">Victory Points</h3>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.vp ? '▶' : '▼' ]]</span>
+                    </div>
+                    <div v-show="!sectionCollapsed.vp" class="p-4 pt-2">
                     <div class="flex justify-around gap-2">
                         <div v-if="leftPlayer" class="flex items-center gap-1">
                             <span :style="{ color: leftPlayer.color }">[[ leftPlayer.name ]]:</span>
@@ -311,126 +336,95 @@
                             </template>
                         </div>
                     </div>
+                    </div>
                 </div>
                 
-                <!-- Solo Mode Indicator -->
-                <div v-if="game.is_solo" class="p-4 border-b border-base-300 bg-warning/10">
-                    <div class="flex items-center justify-between">
+                <!-- Solo Mode Controls -->
+                <div v-if="game.is_solo" class="border-b border-base-300">
+                    <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between bg-warning/10" @click="toggleSection('solo')">
                         <div class="flex items-center gap-2">
-                            <span class="badge badge-warning">Solo Mode</span>
-                            <span class="text-xs text-base-content/70">Controlling both armies</span>
+                            <span class="badge badge-warning badge-sm">Solo</span>
+                            <h3 class="font-bold text-sm">Solo Controls</h3>
+                        </div>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.solo ? '▶' : '▼' ]]</span>
+                    </div>
+                    <div v-show="!sectionCollapsed.solo" class="p-4 pt-2 space-y-3">
+                        <!-- Player Switcher -->
+                        <div v-if="(game.status === 'lobby' || game.status === 'in_progress') && players.length > 1">
+                            <p class="text-xs font-semibold mb-1">Control Player</p>
+                            <div class="space-y-1">
+                                <button
+                                    v-for="player in players"
+                                    :key="player.id"
+                                    class="btn btn-xs btn-block"
+                                    :class="currentPlayerId === player.id ? 'btn-primary' : 'btn-outline'"
+                                    @click="switchPlayer(player.id)"
+                                    :disabled="isExpired"
+                                >
+                                    [[ player.name ]]
+                                    <span v-if="currentPlayerId === player.id" class="badge badge-xs ml-1">Active</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Rename Opponent -->
+                        <div v-if="players.length > 1 && opponentPlayer">
+                            <p class="text-xs font-semibold mb-1">Opponent Name</p>
+                            <div class="flex gap-2">
+                                <input type="text" v-model="opponentNameEdit" class="input input-xs input-bordered flex-1" placeholder="Opponent name" maxlength="50" :disabled="isExpired || isRenamingPlayer" />
+                                <button class="btn btn-xs btn-primary" :disabled="isExpired || isRenamingPlayer || !opponentNameEdit.trim() || opponentNameEdit.trim() === opponentPlayer.name" @click="updatePlayerName(opponentPlayer.id, opponentNameEdit.trim())">
+                                    [[ isRenamingPlayer ? '…' : 'Save' ]]
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Save/Load -->
+                        <div>
+                            <p class="text-xs font-semibold mb-1">Save / Load</p>
+                            <div class="flex gap-2">
+                                <button class="btn btn-xs btn-outline flex-1" @click="showSaveModal = true">Save</button>
+                                <button class="btn btn-xs btn-outline flex-1" @click="showLoadModal = true" :disabled="isExpired">Load</button>
+                            </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Player Switcher (Solo Mode Only) -->
-                <div v-if="game.is_solo && (game.status === 'lobby' || game.status === 'in_progress') && players.length > 1" class="p-4 border-b border-base-300">
-                    <h3 class="font-bold mb-2">Control Player</h3>
-                    <div class="space-y-2">
-                        <button
-                            v-for="player in players"
-                            :key="player.id"
-                            class="btn btn-sm btn-block"
-                            :class="currentPlayerId === player.id ? 'btn-primary' : 'btn-outline'"
-                            @click="switchPlayer(player.id)"
-                            :disabled="isExpired"
-                        >
-                            [[ player.name ]]
-                            <span v-if="currentPlayerId === player.id" class="badge badge-sm ml-2">Active</span>
-                        </button>
+                <!-- Round & Turn Controls -->
+                <div class="border-b border-base-300">
+                    <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('round')">
+                        <h3 class="font-bold">Round [[ game.current_round ]] / [[ game.max_rounds ]]</h3>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.round ? '▶' : '▼' ]]</span>
                     </div>
-                </div>
-                
-                <!-- Rename Opponent (Solo Mode Only) -->
-                <div v-if="game.is_solo && players.length > 1 && opponentPlayer" class="p-4 border-b border-base-300">
-                    <h3 class="font-bold mb-2">Opponent Name</h3>
-                    <div class="flex gap-2">
-                        <input
-                            type="text"
-                            v-model="opponentNameEdit"
-                            class="input input-sm input-bordered flex-1"
-                            placeholder="Opponent name"
-                            maxlength="50"
-                            :disabled="isExpired || isRenamingPlayer"
-                        />
-                        <button
-                            class="btn btn-sm btn-primary"
-                            :disabled="isExpired || isRenamingPlayer || !opponentNameEdit.trim() || opponentNameEdit.trim() === opponentPlayer.name"
-                            @click="updatePlayerName(opponentPlayer.id, opponentNameEdit.trim())"
-                        >
-                            [[ isRenamingPlayer ? 'Saving…' : 'Save' ]]
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Save/Load Controls (Solo Mode Only) -->
-                <div v-if="game.is_solo" class="p-4 border-b border-base-300">
-                    <h3 class="font-bold mb-2">Save/Load</h3>
-                    <div class="space-y-2">
-                        <button
-                            class="btn btn-sm btn-block btn-outline"
-                            @click="showSaveModal = true"
-                        >
-                            Save Game
-                        </button>
-                        <button
-                            class="btn btn-sm btn-block btn-outline"
-                            @click="showLoadModal = true"
-                            :disabled="isExpired"
-                        >
-                            Load Game
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Round Tracker -->
-                <div class="p-4 border-b border-base-300">
-                    <h3 class="font-bold mb-2">Round</h3>
-                    <div class="flex items-center justify-center gap-2">
-                        <button 
-                            v-if="!observerMode"
-                            class="btn btn-xs btn-circle btn-ghost"
-                            @click="updateRound(-1)"
-                            :disabled="isExpired || game.current_round <= 1"
-                        >
-                            -
-                        </button>
-                        <span class="font-bold min-w-[3rem] text-center">[[ game.current_round ]]</span>
-                        <button 
-                            v-if="!observerMode"
-                            class="btn btn-xs btn-circle btn-ghost"
-                            @click="updateRound(1)"
-                            :disabled="isExpired"
-                        >
-                            +
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Turn Controls -->
-                <div class="p-4 border-b border-base-300" v-if="!observerMode && game.status === 'in_progress'">
-                    <h3 class="font-bold mb-2">Turn Controls</h3>
-                    <div class="space-y-2">
-                        <button 
-                            class="btn btn-sm btn-block"
-                            :disabled="isExpired || game.current_round >= game.max_rounds"
-                            @click="advanceRound"
-                        >
-                            End Round → Round [[ game.current_round + 1 ]]
-                        </button>
-                        <button 
-                            v-if="game.current_round >= game.max_rounds"
-                            class="btn btn-sm btn-block btn-warning"
-                            @click="endGame"
-                        >
-                            End Game
-                        </button>
+                    <div v-show="!sectionCollapsed.round" class="p-4 pt-2">
+                        <div class="flex items-center justify-center gap-2 mb-2">
+                            <button v-if="!observerMode" class="btn btn-xs btn-circle btn-ghost" @click="updateRound(-1)" :disabled="isExpired || game.current_round <= 1">-</button>
+                            <span class="font-bold text-2xl min-w-[3rem] text-center">[[ game.current_round ]]</span>
+                            <button v-if="!observerMode" class="btn btn-xs btn-circle btn-ghost" @click="updateRound(1)" :disabled="isExpired">+</button>
+                        </div>
+                        <div v-if="!observerMode && game.status === 'in_progress'" class="space-y-2">
+                            <button 
+                                class="btn btn-lg btn-block btn-warning font-bold"
+                                :disabled="isExpired || game.current_round >= game.max_rounds"
+                                @click="advanceRound"
+                            >
+                                End Round [[ game.current_round ]] → Start Round [[ game.current_round + 1 ]]
+                            </button>
+                            <button 
+                                v-if="game.current_round >= game.max_rounds"
+                                class="btn btn-sm btn-block btn-error"
+                                @click="endGame"
+                            >
+                                End Game
+                            </button>
+                        </div>
                     </div>
                 </div>
                 
                 <!-- Lobby Controls (before game starts) -->
-                <div class="p-4 border-b border-base-300" v-if="!observerMode && game.status === 'lobby'">
-                    <h3 class="font-bold mb-2">Game Setup</h3>
+                <div class="border-b border-base-300" v-if="!observerMode && game.status === 'lobby'">
+                    <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('lobby')">
+                        <h3 class="font-bold">Game Setup</h3>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.lobby ? '▶' : '▼' ]]</span>
+                    </div>
+                    <div v-show="!sectionCollapsed.lobby" class="p-4 pt-2">
                     
                     <!-- Player Selector (Solo Mode Only) -->
                     <div v-if="game.is_solo && players.length > 1" class="form-control mb-2">
@@ -510,13 +504,18 @@
                         <span v-if="game.is_solo">Add units to start</span>
                         <span v-else>Both players need armies</span>
                     </p>
+                    </div>
                 </div>
                 
                 <!-- Game Log -->
                 <div class="game-log flex-1 overflow-hidden flex flex-col">
-                    <div class="p-2 border-b border-base-300 flex justify-between items-center">
-                        <h3 class="font-bold text-sm">Game Log</h3>
-                        <div v-if="!observerMode" class="flex gap-2">
+                    <div class="p-2 border-b border-base-300 flex justify-between items-center cursor-pointer select-none" @click="toggleSection('log')">
+                        <div class="flex items-center gap-2">
+                            <h3 class="font-bold text-sm">Game Log</h3>
+                            <span class="badge badge-xs">[[ events.length ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.log ? '▶' : '▼' ]]</span>
+                        </div>
+                        <div v-if="!observerMode" class="flex gap-2" @click.stop>
                             <button 
                                 class="btn btn-xs btn-ghost"
                                 @click="exportEventLog"
@@ -534,7 +533,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="game-log-content flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
+                    <div v-show="!sectionCollapsed.log" class="game-log-content flex-1 overflow-y-auto p-2 space-y-1 text-xs max-h-64 md:max-h-none">
                         <div 
                             v-for="event in events"
                             :key="event.id"
@@ -556,17 +555,19 @@
             <!-- Right Column (opponent if present) -->
             <div class="player-column flex-1 p-4 overflow-y-auto border-l border-base-200" :class="{ 'opacity-50 pointer-events-none': isExpired }">
                 <div v-if="rightPlayer" class="mb-4">
-                    <!-- Player Header -->
-                    <div class="flex items-center gap-2 mb-2">
+                    <!-- Player Header (collapsible) -->
+                    <div class="flex items-center gap-2 mb-2 cursor-pointer select-none" @click="toggleSection('rightArmy')">
                         <div 
                             class="w-4 h-4 rounded-full"
                             :style="{ backgroundColor: rightPlayer.color }"
                         ></div>
-                        <h2 class="text-lg font-bold">[[ rightPlayer.name ]]</h2>
+                        <h2 class="text-lg font-bold flex-1">[[ rightPlayer.name ]]</h2>
                         <span v-if="!rightPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
                         <span v-if="game.current_player_id === rightPlayer.id" class="badge badge-info badge-sm">Active</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.rightArmy ? '▶' : '▼' ]]</span>
                     </div>
                     
+                    <div v-show="!sectionCollapsed.rightArmy">
                     <!-- Army Health Bar -->
                     <div class="mb-4">
                         <div class="flex justify-between text-sm mb-1">
@@ -581,7 +582,7 @@
                             ></div>
                         </div>
                         <div v-if="isMoraleThreshold(rightPlayer.id)" class="text-warning text-xs mt-1">
-                            ⚠️ Morale Threshold Reached
+                            Morale Threshold Reached
                         </div>
                     </div>
                     
@@ -597,6 +598,25 @@
                             @open-action-modal="openActionModal"
                             @open-cast-modal="openCastModal"
                         ></unit-card>
+                    </div>
+                    
+                    <!-- Spells Reference -->
+                    <div v-if="getPlayerSpells(rightPlayer.id).length > 0" class="mt-4">
+                        <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('rightSpells')">
+                            <h3 class="font-bold text-sm">Spells</h3>
+                            <span class="badge badge-xs">[[ getPlayerSpells(rightPlayer.id).length ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.rightSpells ? '▶' : '▼' ]]</span>
+                        </div>
+                        <div v-show="!sectionCollapsed.rightSpells" class="space-y-1">
+                            <div v-for="spell in getPlayerSpells(rightPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
+                                <div class="flex justify-between items-start">
+                                    <span class="font-semibold">[[ spell.name ]]</span>
+                                    <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                </div>
+                                <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
+                            </div>
+                        </div>
+                    </div>
                     </div>
                 </div>
                 <div v-else class="flex items-center justify-center h-full text-base-content/50">
@@ -1178,84 +1198,83 @@
         <div class="modal-backdrop bg-black/50" @click="showLoadModal = false"></div>
     </dialog>
     
-    <!-- Unit Action Modal -->
+    <!-- Unit Action Modal (Activation Wizard) -->
     <dialog v-if="showActionModal" :open="showActionModal" class="modal modal-open">
-        <div class="modal-box max-w-2xl">
-            <h3 class="font-bold text-lg mb-4">
-                Select Action for 
-                <span v-if="getUnitForAction()">
-                    [[ getUnitForAction().display_name || getUnitForAction().name || 'Unit' ]]
-                </span>
+        <div class="modal-box max-w-2xl max-h-[90vh] flex flex-col">
+            <h3 class="font-bold text-lg mb-3">
+                Activate: [[ getUnitForAction()?.display_name || getUnitForAction()?.name || 'Unit' ]]
             </h3>
             
-            <!-- Cast spell (optional, before attacks) -->
-            <div v-if="getUnitForAction()?.is_caster && !getUnitForAction()?.state?.is_shaken && (getUnitForAction()?.state?.spell_tokens ?? 0) >= 1" class="mb-6 p-3 bg-base-200 rounded-lg">
-                <p class="text-sm text-base-content/70 mb-2">Cast spells (optional, before attacks). Tokens: [[ getUnitForAction()?.state?.spell_tokens ?? 0 ]] / 6</p>
-                <button
-                    type="button"
-                    class="btn btn-sm btn-accent"
-                    @click="openCastModal(selectedUnitForAction)"
-                >
-                    Cast spell
-                </button>
-            </div>
-            
-            <!-- Action Selection -->
-            <div class="mb-6">
-                <p class="text-sm text-base-content/70 mb-3">Choose an action:</p>
-                <p v-if="getUnitForAction()?.state?.is_shaken" class="text-warning text-sm mb-2">Shaken units can only Hold (idle to recover).</p>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <!-- 1. Choose Action -->
+            <div class="mb-4">
+                <p class="text-sm font-semibold mb-2">1. Choose action</p>
+                <p v-if="getUnitForAction()?.state?.is_shaken" class="text-warning text-xs mb-2">Shaken: must idle (Hold) to recover.</p>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <button
-                        class="btn btn-sm"
-                        :class="selectedAction === 'rush' ? 'btn-primary' : 'btn-outline'"
-                        @click="selectAction('rush')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
-                    >
-                        Rush
-                    </button>
-                    <button
-                        class="btn btn-sm"
-                        :class="selectedAction === 'advance' ? 'btn-primary' : 'btn-outline'"
-                        @click="selectAction('advance')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
-                    >
-                        Advance
-                    </button>
-                    <button
-                        class="btn btn-sm"
+                        class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'hold' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('hold')"
                         :disabled="isExpired"
                     >
-                        Hold
+                        <span class="font-bold">Hold</span>
+                        <span class="text-[10px] font-normal opacity-70">No move. Can shoot.</span>
                     </button>
                     <button
-                        class="btn btn-sm"
+                        class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
+                        :class="selectedAction === 'advance' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('advance')"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
+                    >
+                        <span class="font-bold">Advance</span>
+                        <span class="text-[10px] font-normal opacity-70">Move 6". Can shoot.</span>
+                    </button>
+                    <button
+                        class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
+                        :class="selectedAction === 'rush' ? 'btn-primary' : 'btn-outline'"
+                        @click="selectAction('rush')"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
+                    >
+                        <span class="font-bold">Rush</span>
+                        <span class="text-[10px] font-normal opacity-70">Move 12". No attacks.</span>
+                    </button>
+                    <button
+                        class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'charge' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('charge')"
                         :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
                     >
-                        Charge
-                    </button>
-                    <button
-                        class="btn btn-sm"
-                        :class="selectedAction === 'attack' ? 'btn-primary' : 'btn-outline'"
-                        @click="selectAction('attack')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
-                    >
-                        Attack
+                        <span class="font-bold">Charge</span>
+                        <span class="text-[10px] font-normal opacity-70">Move 12" into melee.</span>
                     </button>
                 </div>
             </div>
             
-            <!-- Target Selection (for Charge/Attack) -->
-            <div v-if="selectedAction === 'charge' || selectedAction === 'attack'" class="mb-6">
-                <p class="text-sm text-base-content/70 mb-3">
-                    Select target unit(s) ([[ selectedTargets.length ]] selected):
+            <!-- 2. Cast Spells (shown after action chosen, if caster with tokens and not shaken) -->
+            <div v-if="selectedAction && canCastInActivation()" class="mb-4 p-3 bg-base-200 rounded-lg">
+                <p class="text-sm font-semibold mb-1">2. Cast spells <span class="font-normal text-base-content/60">(optional, before attacking)</span></p>
+                <p class="text-xs text-base-content/70 mb-2">Tokens: [[ getUnitForAction()?.state?.spell_tokens ?? 0 ]] / 6. Cast one or more spells, then select targets below.</p>
+                <button
+                    type="button"
+                    class="btn btn-sm btn-accent"
+                    @click="openCastModal(selectedUnitForAction)"
+                    :disabled="(getUnitForAction()?.state?.spell_tokens ?? 0) < 1"
+                >
+                    Cast Spell
+                </button>
+            </div>
+            
+            <!-- 3. Select Targets (Hold/Advance = shooting, Charge = melee target) -->
+            <div v-if="selectedAction && selectedAction !== 'rush'" class="mb-4 flex-1 overflow-y-auto">
+                <p class="text-sm font-semibold mb-2" v-if="selectedAction === 'charge'">
+                    [[ canCastInActivation() ? '3' : '2' ]]. Select charge target
+                </p>
+                <p class="text-sm font-semibold mb-2" v-else>
+                    [[ canCastInActivation() ? '3' : '2' ]]. Select shooting target(s)
+                    <span class="font-normal text-base-content/60">(optional, [[ selectedTargets.length ]] selected)</span>
                 </p>
                 <div 
                     v-if="getUnitForAction()"
-                    class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto"
+                    class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto"
                 >
                     <div
                         v-for="targetUnit in getOpposingUnits(getUnitForAction().player_id)"
@@ -1294,30 +1313,29 @@
                         </div>
                     </div>
                 </div>
-                <p v-if="getUnitForAction() && getOpposingUnits(getUnitForAction().player_id).length === 0" class="text-sm text-warning">
-                    No opposing units available to target
+                <p v-if="getUnitForAction() && getOpposingUnits(getUnitForAction().player_id).length === 0" class="text-sm text-base-content/50 mt-1">
+                    No opposing units available to target.
                 </p>
             </div>
             
-            <div class="modal-action">
-                <button
-                    type="button"
-                    class="btn btn-ghost"
-                    @click="showActionModal = false; selectedAction = null; selectedTargets = []; selectedUnitForAction = null;"
-                >
-                    Cancel
-                </button>
+            <!-- Rush: no attack -->
+            <div v-if="selectedAction === 'rush'" class="mb-4">
+                <p class="text-sm text-base-content/50 italic">Rush: no shooting or melee this activation.</p>
+            </div>
+            
+            <div class="modal-action mt-2">
+                <button type="button" class="btn btn-ghost" @click="closeActionModal">Cancel</button>
                 <button
                     type="button"
                     class="btn btn-primary"
                     @click="logUnitAction"
-                    :disabled="isExpired || !selectedAction || ((selectedAction === 'charge' || selectedAction === 'attack') && selectedTargets.length === 0)"
+                    :disabled="isExpired || !selectedAction || (selectedAction === 'charge' && selectedTargets.length === 0)"
                 >
-                    [[ getActionButtonText() ]]
+                    Confirm [[ selectedAction ? selectedAction.charAt(0).toUpperCase() + selectedAction.slice(1) : '' ]]
                 </button>
             </div>
         </div>
-        <div class="modal-backdrop bg-black/50" @click="showActionModal = false; selectedAction = null; selectedTargets = []; selectedUnitForAction = null;"></div>
+        <div class="modal-backdrop bg-black/50" @click="closeActionModal"></div>
     </dialog>
     
     <!-- Cast Spell Modal -->
@@ -1415,13 +1433,34 @@
         <div class="card-body p-3">
             <!-- Header -->
             <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <span class="font-bold text-sm">[[ unit.custom_name || unit.name ]]</span>
-                    <span class="badge badge-sm">[[ unit.size ]]</span>
-                    <span v-if="unit.is_hero" class="badge badge-sm badge-secondary">Hero</span>
-                    <span v-if="attachedHeroes.length > 0" class="badge badge-sm badge-primary">+[[ attachedHeroes.length ]] Hero[[ attachedHeroes.length > 1 ? 'es' : '' ]]</span>
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                    <template v-if="isEditingName">
+                        <input
+                            type="text"
+                            v-model="editNameValue"
+                            class="input input-xs input-bordered flex-1 min-w-0"
+                            @keyup.enter="confirmRename"
+                            @keyup.escape="cancelRename"
+                            maxlength="100"
+                            ref="renameInput"
+                        />
+                        <button class="btn btn-xs btn-ghost" @click="confirmRename" title="Save">✓</button>
+                        <button class="btn btn-xs btn-ghost" @click="cancelRename" title="Cancel">✕</button>
+                    </template>
+                    <template v-else>
+                        <span class="font-bold text-sm truncate">[[ unit.custom_name || unit.name ]]</span>
+                        <span class="badge badge-sm">[[ unit.size ]]</span>
+                        <span v-if="unit.is_hero" class="badge badge-sm badge-secondary">Hero</span>
+                        <span v-if="attachedHeroes.length > 0" class="badge badge-sm badge-primary">+[[ attachedHeroes.length ]] Hero[[ attachedHeroes.length > 1 ? 'es' : '' ]]</span>
+                    </template>
                 </div>
-                <span class="text-xs text-base-content/50">[[ unit.cost ]]pts</span>
+                <div class="flex items-center gap-1">
+                    <template v-if="isMine && isLobby && !isEditingName">
+                        <button class="btn btn-xs btn-ghost opacity-50 hover:opacity-100" @click.stop="startRename" title="Rename unit">✎</button>
+                        <button class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100" @click.stop="deleteThisUnit" title="Remove unit">✕</button>
+                    </template>
+                    <span class="text-xs text-base-content/50">[[ unit.cost ]]pts</span>
+                </div>
             </div>
             
             <!-- Stats Row -->
@@ -1590,7 +1629,13 @@
                     <div v-if="rulesDisplay.length > 0">
                         <div class="font-semibold text-base-content/70">Rules</div>
                         <div class="flex flex-wrap gap-1">
-                            <span v-for="(r, i) in rulesDisplay" :key="i" class="badge badge-ghost badge-sm">[[ r ]]</span>
+                            <span
+                                v-for="(r, i) in rulesDisplay"
+                                :key="i"
+                                class="badge badge-ghost badge-sm"
+                                :class="{ 'tooltip tooltip-bottom cursor-help': getRuleDescription(r) }"
+                                :data-tip="getRuleDescription(r) || undefined"
+                            >[[ r ]]</span>
                         </div>
                     </div>
                     <div v-if="fullLoadoutDisplay.length > 0">
@@ -1663,7 +1708,13 @@
                             <div v-if="getRulesForUnit(hero).length > 0">
                                 <div class="font-semibold text-base-content/70">Rules</div>
                                 <div class="flex flex-wrap gap-1">
-                                    <span v-for="(r, i) in getRulesForUnit(hero)" :key="i" class="badge badge-ghost badge-sm">[[ r ]]</span>
+                                    <span
+                                        v-for="(r, i) in getRulesForUnit(hero)"
+                                        :key="i"
+                                        class="badge badge-ghost badge-sm"
+                                        :class="{ 'tooltip tooltip-bottom cursor-help': getRuleDescription(r) }"
+                                        :data-tip="getRuleDescription(r) || undefined"
+                                    >[[ r ]]</span>
                                 </div>
                             </div>
                             <div v-if="getLoadoutForUnit(hero).length > 0">
@@ -1704,10 +1755,35 @@ document.addEventListener("DOMContentLoaded", () => {
             isMine: { type: Boolean, default: false },
             showToast: { type: Function, default: () => {} },
         },
-        emits: ['update', 'open-action-modal', 'open-cast-modal'],
+        emits: ['update', 'open-action-modal', 'open-cast-modal', 'delete-unit', 'rename-unit'],
         setup(props, { emit }) {
             const store = GameStore;
             const showDetails = ref(false);
+            const isEditingName = ref(false);
+            const editNameValue = ref('');
+            const isLobby = computed(() => store.state.game?.status === 'lobby');
+            
+            const startRename = () => {
+                editNameValue.value = props.unit.custom_name || props.unit.name;
+                isEditingName.value = true;
+            };
+            const confirmRename = async () => {
+                const val = editNameValue.value.trim();
+                if (!val) { isEditingName.value = false; return; }
+                try {
+                    const code = store.state.game?.code;
+                    if (code) await store.actions.renameUnit(code, props.unit.id, val);
+                    isEditingName.value = false;
+                } catch (e) { props.showToast(e.message || 'Rename failed'); }
+            };
+            const cancelRename = () => { isEditingName.value = false; };
+            const deleteThisUnit = async () => {
+                if (!confirm(`Remove "${props.unit.custom_name || props.unit.name}" from the roster?`)) return;
+                try {
+                    const code = store.state.game?.code;
+                    if (code) await store.actions.deleteUnit(code, props.unit.id);
+                } catch (e) { props.showToast(e.message || 'Delete failed'); }
+            };
             
             const maxWounds = computed(() => props.unit.size * props.unit.tough);
             
@@ -1838,6 +1914,46 @@ document.addEventListener("DOMContentLoaded", () => {
                 const desc = (u.description || u.text || '').toString().trim();
                 if (desc) return desc.length > 60 ? desc.slice(0, 57) + '…' : desc;
                 return '';
+            };
+            const GDF_RULES = {
+                'Aircraft': 'May only use Advance actions, moving in a straight line, and adding 30" to its total move. Ignores all units and terrain when moving.',
+                'Ambush': 'May be set aside before deployment. At the start of any round after the first, deploy anywhere over 9" from enemies.',
+                'AP': 'Targets get -X to Defense rolls when blocking hits from this weapon.',
+                'Artillery': 'May only use Hold actions. +1 to hit over 9". Enemies shooting from over 9" get -2 to hit.',
+                'Bane': 'Ignores Regeneration; target must re-roll unmodified Defense 6s.',
+                'Blast': 'Ignores cover; each hit is multiplied by X (up to models in target unit).',
+                'Caster': 'Gets X spell tokens each round (max 6). Before attacking, spend tokens to cast spells. Roll 4+ to succeed. Allies within 18" LOS can spend tokens for +1/-1.',
+                'Counter': 'Strikes first when charged. Charging unit gets -1 total Impact rolls per model with Counter.',
+                'Deadly': 'Assign each wound to one model and multiply by X. Resolved first; wounds don\'t carry over.',
+                'Fast': '+2" on Advance, +4" on Rush/Charge.',
+                'Fear': 'Counts as having dealt +X wounds when checking who won melee.',
+                'Fearless': 'When failing morale, roll one die; on 4+ it counts as passed.',
+                'Flying': 'May move through units and terrain, ignoring terrain effects.',
+                'Furious': 'When charging, unmodified 6s to hit in melee deal 1 extra hit.',
+                'Hero': 'May deploy as part of one multi-model unit. Takes morale tests on behalf of the unit; uses unit Defense until others are killed.',
+                'Immobile': 'May only use Hold actions.',
+                'Impact': 'Roll X dice when charging (unless fatigued). Each 2+ = one hit on target.',
+                'Indirect': '-1 to hit after moving. May target enemies not in LOS; ignores cover from sight obstructions.',
+                'Limited': 'May only be used once per game.',
+                'Regeneration': 'When taking wounds, roll one die per wound; on 5+ it is ignored.',
+                'Relentless': 'When shooting enemies over 9" away, unmodified 6s deal 1 extra hit.',
+                'Reliable': 'Attacks at Quality 2+ with this weapon.',
+                'Rending': 'Ignores Regeneration; unmodified 6s to hit get AP(+4).',
+                'Scout': 'After all other units deploy, may deploy within 12" of deployment zone.',
+                'Slow': '-2" on Advance, -4" on Rush/Charge.',
+                'Stealth': 'When shot from over 9", enemies get -1 to hit.',
+                'Strider': 'Ignores difficult terrain effects when moving.',
+                'Surge': 'Unmodified 6s to hit deal 1 extra hit.',
+                'Takedown': 'May pick any model in target unit as individual target (resolved as unit of 1).',
+                'Thrust': 'When charging, +1 to hit and AP(+1) in melee.',
+                'Tough': 'Must take X wounds before being killed. Removed last when unit takes wounds.',
+                'Transport': 'May carry up to X models. Units enter/exit via move actions within 6". On destruction: dangerous terrain test, Shaken, placed within 6".',
+                'Unstoppable': 'Ignores Regeneration and all negative modifiers.',
+            };
+            const getRuleDescription = (ruleText) => {
+                if (!ruleText || typeof ruleText !== 'string') return null;
+                const baseName = ruleText.replace(/\s*\(.*\)\s*$/, '').trim();
+                return GDF_RULES[baseName] || null;
             };
             const isFlavorCasterName = (name) => {
                 if (!name || typeof name !== 'string') return false;
@@ -2019,7 +2135,15 @@ document.addEventListener("DOMContentLoaded", () => {
             
             return {
                 showDetails,
+                isEditingName,
+                editNameValue,
+                isLobby,
+                startRename,
+                confirmRename,
+                cancelRename,
+                deleteThisUnit,
                 rulesDisplay,
+                getRuleDescription,
                 fullLoadoutDisplay,
                 upgradesDisplay,
                 getRulesForUnit,
@@ -2082,6 +2206,14 @@ document.addEventListener("DOMContentLoaded", () => {
             const opponentPlayer = computed(() =>
                 players.value.find(p => p.id && p.id !== currentPlayerId.value) || null
             );
+            
+            const defaultCollapsed = { vp: false, solo: false, saveload: false, round: false, turn: false, lobby: false, log: false, leftArmy: false, rightArmy: false, leftSpells: false, rightSpells: false };
+            const savedCollapsed = (() => { try { return JSON.parse(localStorage.getItem('herald_collapsed') || '{}'); } catch { return {}; } })();
+            const sectionCollapsed = reactive({ ...defaultCollapsed, ...savedCollapsed });
+            const toggleSection = (key) => {
+                sectionCollapsed[key] = !sectionCollapsed[key];
+                try { localStorage.setItem('herald_collapsed', JSON.stringify(sectionCollapsed)); } catch {}
+            };
             
             const armyForgeUrl = ref('');
             const isImporting = ref(false);
@@ -2248,10 +2380,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 return units.value.find(u => String(u.id) === String(selectedUnitForAction.value));
             };
             
-            const getActionButtonText = () => {
-                if (!selectedAction.value) return 'Log Action';
-                // Capitalize first letter
-                return selectedAction.value.charAt(0).toUpperCase() + selectedAction.value.slice(1);
+            const canCastInActivation = () => {
+                const u = getUnitForAction();
+                return u?.is_caster && !u?.state?.is_shaken && (u?.state?.spell_tokens ?? 0) >= 1;
+            };
+            
+            const closeActionModal = () => {
+                showActionModal.value = false;
+                selectedUnitForAction.value = null;
+                selectedAction.value = null;
+                selectedTargets.value = [];
             };
             
             const openActionModal = (unitId) => {
@@ -2266,6 +2404,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 const list = player?.spells;
                 if (list && Array.isArray(list) && list.length > 0) return list;
                 return DEFAULT_SPELLS;
+            };
+            const getPlayerSpells = (playerId) => {
+                const player = players.value.find(p => String(p.id) === String(playerId));
+                const list = player?.spells;
+                if (list && Array.isArray(list) && list.length > 0) return list;
+                const hasCaster = units.value.some(u => String(u.player_id) === String(playerId) && u.is_caster);
+                return hasCaster ? DEFAULT_SPELLS : [];
             };
             const selectCastSpell = (spell) => {
                 const u = getUnitForCast();
@@ -2340,13 +2485,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
                 
-                if ((selectedAction.value === 'charge' || selectedAction.value === 'attack') && selectedTargets.value.length === 0) {
-                    showToast('Please select at least one target unit');
+                if (selectedAction.value === 'charge' && selectedTargets.value.length === 0) {
+                    showToast('Please select a charge target');
                     return;
                 }
                 
                 try {
-                    // Convert target IDs to UUIDs for API
                     const targetUuids = selectedTargets.value.map(id => id);
                     await store.actions.logUnitAction(
                         GAME_CODE,
@@ -2354,14 +2498,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         selectedAction.value,
                         targetUuids
                     );
-                    
-                    // Close modal and reset state
-                    showActionModal.value = false;
-                    selectedUnitForAction.value = null;
-                    selectedAction.value = null;
-                    selectedTargets.value = [];
-                    
-                    // Refresh events
+                    closeActionModal();
                     await store.actions.fetchEvents();
                 } catch (error) {
                     showToast('Failed to log action: ' + error.message);
@@ -3187,6 +3324,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 manualUnitForm,
                 showClearUnitsModal,
                 isClearingUnits,
+                sectionCollapsed,
+                toggleSection,
                 confirmClearUnits,
                 showSaveModal,
                 showLoadModal,
@@ -3218,6 +3357,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 castTargetUnitId,
                 selectedCastSpell,
                 getSpellsForCaster,
+                getPlayerSpells,
                 selectCastSpell,
                 showClearLogModal,
                 isClearingLog,
@@ -3254,7 +3394,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 getOpposingUnits,
                 getUnitForAction,
                 getAttachedHeroesForUnit,
-                getActionButtonText,
+                canCastInActivation,
+                closeActionModal,
                 openActionModal,
                 openCastModal,
                 getUnitForCast,

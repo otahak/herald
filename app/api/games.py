@@ -40,6 +40,7 @@ from app.api.game_schemas import (
     UpdateUnitStateRequest,
     LogUnitActionRequest,
     CastSpellRequest,
+    UpdateUnitProfileRequest,
     UpdateObjectiveRequest,
     CreateObjectivesRequest,
     UpdateVictoryPointsRequest,
@@ -1046,6 +1047,81 @@ class GamesController(Controller):
             }
         })
         
+        return _unit_response_with_effective_caster(unit)
+    
+    @delete("/{code:str}/units/{unit_id:uuid}")
+    async def delete_unit(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> dict:
+        """Delete a single unit (lobby only)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Units can only be deleted during lobby")
+        
+        unit = None
+        unit_player = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    unit_player = player
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        
+        unit_cost = unit.cost or 0
+        if unit.state:
+            await session.delete(unit.state)
+        await session.delete(unit)
+        
+        if unit_player:
+            unit_player.starting_unit_count = max(0, (unit_player.starting_unit_count or 0) - 1)
+            unit_player.starting_points = max(0, (unit_player.starting_points or 0) - unit_cost)
+        
+        await session.commit()
+        
+        await broadcast_if_not_solo(game, code, {
+            "type": "state_update",
+            "data": {"reason": "unit_deleted", "unit_id": str(unit_id)},
+        })
+        return {"success": True, "message": f"Unit deleted"}
+    
+    @patch("/{code:str}/units/{unit_id:uuid}/profile")
+    async def update_unit_profile(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        data: UpdateUnitProfileRequest,
+        session: AsyncSession,
+    ) -> UnitResponse:
+        """Update a unit's profile fields (lobby only)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Unit profile can only be edited during lobby")
+        
+        unit = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        
+        if data.custom_name is not None:
+            unit.custom_name = data.custom_name.strip() if data.custom_name.strip() else None
+        
+        await session.commit()
+        
+        await broadcast_if_not_solo(game, code, {
+            "type": "state_update",
+            "data": {"reason": "unit_updated", "unit_id": str(unit_id)},
+        })
         return _unit_response_with_effective_caster(unit)
     
     @post("/{code:str}/units/{unit_id:uuid}/actions")
