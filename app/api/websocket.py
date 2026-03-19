@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Game, Player, GameEvent, EventType
 from app.utils.logging import error_log, log_exception_with_context
+from app.utils.unit_stats import get_effective_caster
 
 logger = logging.getLogger("Herald.WebSocket")
 
@@ -161,6 +162,7 @@ async def get_game_state(session: AsyncSession, code: str) -> Optional[dict]:
             "starting_unit_count": player.starting_unit_count,
             "starting_points": player.starting_points,
             "has_finished_activations": player.has_finished_activations,
+            "spells": player.spells,
         })
         
         for unit in player.units:
@@ -177,8 +179,8 @@ async def get_game_state(session: AsyncSession, code: str) -> Optional[dict]:
                 "loadout": unit.loadout,
                 "rules": unit.rules,
                 "is_hero": unit.is_hero,
-                "is_caster": unit.is_caster,
-                "caster_level": unit.caster_level,
+                "is_caster": (ec := get_effective_caster(unit))[0],
+                "caster_level": (ec[1] or unit.caster_level) if ec[0] else unit.caster_level,
                 "is_transport": unit.is_transport,
                 "transport_capacity": unit.transport_capacity,
                 "has_ambush": unit.has_ambush,

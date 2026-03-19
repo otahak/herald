@@ -253,6 +253,7 @@
                             :show-toast="showToast"
                             @update="updateUnit"
                             @open-action-modal="openActionModal"
+                            @open-cast-modal="openCastModal"
                         ></unit-card>
                     </div>
                 </div>
@@ -594,6 +595,7 @@
                             :show-toast="showToast"
                             @update="updateUnit"
                             @open-action-modal="openActionModal"
+                            @open-cast-modal="openCastModal"
                         ></unit-card>
                     </div>
                 </div>
@@ -1186,15 +1188,28 @@
                 </span>
             </h3>
             
+            <!-- Cast spell (optional, before attacks) -->
+            <div v-if="getUnitForAction()?.is_caster && !getUnitForAction()?.state?.is_shaken && (getUnitForAction()?.state?.spell_tokens ?? 0) >= 1" class="mb-6 p-3 bg-base-200 rounded-lg">
+                <p class="text-sm text-base-content/70 mb-2">Cast spells (optional, before attacks). Tokens: [[ getUnitForAction()?.state?.spell_tokens ?? 0 ]] / 6</p>
+                <button
+                    type="button"
+                    class="btn btn-sm btn-accent"
+                    @click="openCastModal(selectedUnitForAction)"
+                >
+                    Cast spell
+                </button>
+            </div>
+            
             <!-- Action Selection -->
             <div class="mb-6">
                 <p class="text-sm text-base-content/70 mb-3">Choose an action:</p>
+                <p v-if="getUnitForAction()?.state?.is_shaken" class="text-warning text-sm mb-2">Shaken units can only Hold (idle to recover).</p>
                 <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
                     <button
                         class="btn btn-sm"
                         :class="selectedAction === 'rush' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('rush')"
-                        :disabled="isExpired"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
                     >
                         Rush
                     </button>
@@ -1202,7 +1217,7 @@
                         class="btn btn-sm"
                         :class="selectedAction === 'advance' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('advance')"
-                        :disabled="isExpired"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
                     >
                         Advance
                     </button>
@@ -1218,7 +1233,7 @@
                         class="btn btn-sm"
                         :class="selectedAction === 'charge' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('charge')"
-                        :disabled="isExpired"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
                     >
                         Charge
                     </button>
@@ -1226,7 +1241,7 @@
                         class="btn btn-sm"
                         :class="selectedAction === 'attack' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('attack')"
-                        :disabled="isExpired"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
                     >
                         Attack
                     </button>
@@ -1305,6 +1320,56 @@
         <div class="modal-backdrop bg-black/50" @click="showActionModal = false; selectedAction = null; selectedTargets = []; selectedUnitForAction = null;"></div>
     </dialog>
     
+    <!-- Cast Spell Modal -->
+    <dialog v-if="showCastModal" :open="showCastModal" class="modal modal-open">
+        <div class="modal-box max-w-lg max-h-[90vh] flex flex-col">
+            <h3 class="font-bold text-lg mb-2">
+                Cast Spell — [[ getUnitForCast()?.display_name || getUnitForCast()?.name || 'Unit' ]]
+            </h3>
+            <p class="text-sm text-base-content/70 mb-3">Tokens: [[ getUnitForCast()?.state?.spell_tokens ?? 0 ]] / 6. Roll 4+ (plus modifier). Pick a spell:</p>
+            <div class="flex-1 overflow-y-auto mb-4">
+                <div class="space-y-2">
+                    <div
+                        v-for="spell in getSpellsForCaster(getUnitForCast())"
+                        :key="spell.name + (spell.cost || 0)"
+                        class="card card-compact bg-base-200 cursor-pointer transition-all"
+                        :class="(selectedCastSpell === spell ? 'ring-2 ring-primary' : 'hover:bg-base-300') + ((getUnitForCast()?.state?.spell_tokens ?? 0) < (spell.cost ?? 1) ? ' opacity-60 cursor-not-allowed' : '')"
+                        @click="selectCastSpell(spell)"
+                    >
+                        <div class="card-body p-3">
+                            <div class="flex justify-between items-start">
+                                <span class="font-semibold">[[ spell.name ]]</span>
+                                <span class="badge badge-sm">[[ spell.cost ?? 1 ]] token[[ (spell.cost ?? 1) !== 1 ? 's' : '' ]]</span>
+                            </div>
+                            <p v-if="spell.description" class="text-xs text-base-content/70 mt-1">[[ spell.description ]]</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-control mb-2">
+                <label class="label py-0"><span class="label-text">Roll modifier (e.g. +1 / -1 from allies)</span></label>
+                <select v-model.number="castRollModifier" class="select select-bordered select-sm w-full">
+                    <option :value="null">None</option>
+                    <option v-for="n in 7" :key="n" :value="n - 3">[[ (n - 3) >= 0 ? '+' : '' ]][[ n - 3 ]]</option>
+                </select>
+            </div>
+            <div v-if="getUnitForCast()" class="form-control mb-3">
+                <label class="label py-0"><span class="label-text">Target unit (optional)</span></label>
+                <select v-model="castTargetUnitId" class="select select-bordered select-sm w-full">
+                    <option :value="null">None</option>
+                    <option v-for="u in getOpposingUnits(getUnitForCast().player_id)" :key="u.id" :value="u.id">[[ u.display_name || u.name ]]</option>
+                </select>
+            </div>
+            <div class="modal-action mt-2">
+                <button type="button" class="btn btn-ghost" @click="closeCastModal">Cancel</button>
+                <button type="button" class="btn btn-primary" @click="attemptCastSubmit" :disabled="!selectedUnitForCast || !selectedCastSpell || (getUnitForCast()?.state?.spell_tokens ?? 0) < (selectedCastSpell?.cost ?? 1)">
+                    Attempt cast
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop bg-black/50" @click="closeCastModal"></div>
+    </dialog>
+    
     <!-- Clear Log Confirmation Modal -->
     <dialog v-if="showClearLogModal" :open="showClearLogModal" class="modal modal-open">
         <div class="modal-box">
@@ -1354,7 +1419,6 @@
                     <span class="font-bold text-sm">[[ unit.custom_name || unit.name ]]</span>
                     <span class="badge badge-sm">[[ unit.size ]]</span>
                     <span v-if="unit.is_hero" class="badge badge-sm badge-secondary">Hero</span>
-                    <span v-if="unit.is_caster" class="badge badge-sm badge-accent">Caster</span>
                     <span v-if="attachedHeroes.length > 0" class="badge badge-sm badge-primary">+[[ attachedHeroes.length ]] Hero[[ attachedHeroes.length > 1 ? 'es' : '' ]]</span>
                 </div>
                 <span class="text-xs text-base-content/50">[[ unit.cost ]]pts</span>
@@ -1414,6 +1478,7 @@
                     <button class="btn btn-xs btn-circle" @click="adjustTokens(-1)" :disabled="unit.state.spell_tokens <= 0">-</button>
                     <span class="font-mono w-8 text-center">[[ unit.state.spell_tokens ]] / 6</span>
                     <button class="btn btn-xs btn-circle" @click="adjustTokens(1)" :disabled="unit.state.spell_tokens >= 6">+</button>
+                    <button class="btn btn-xs btn-accent ml-1" @click="$emit('open-cast-modal', unit.id)" :disabled="unit.state.is_shaken || unit.state.spell_tokens < 1" title="Cast spell (during activation, before attacks)">Cast</button>
                 </div>
                 
                 <!-- Attached Hero Spell Tokens (if any) -->
@@ -1423,6 +1488,7 @@
                         <button class="btn btn-xs btn-circle" @click="adjustHeroTokens(hero, -1)" :disabled="!hero.state || hero.state.spell_tokens <= 0">-</button>
                         <span class="font-mono w-8 text-center">[[ hero.state?.spell_tokens || 0 ]] / 6</span>
                         <button class="btn btn-xs btn-circle" @click="adjustHeroTokens(hero, 1)" :disabled="!hero.state || hero.state.spell_tokens >= 6">+</button>
+                        <button class="btn btn-xs btn-accent ml-1" @click="$emit('open-cast-modal', hero.id)" :disabled="unit.state.is_shaken || !hero.state || hero.state.spell_tokens < 1" title="Cast spell">Cast</button>
                     </div>
                 </template>
                 
@@ -1563,7 +1629,6 @@
                             <span class="text-xs font-semibold">[[ hero.custom_name || hero.name ]]</span>
                             <span class="badge badge-xs">[[ hero.size ]]</span>
                             <span v-if="hero.is_hero" class="badge badge-xs badge-secondary">Hero</span>
-                            <span v-if="hero.is_caster" class="badge badge-xs badge-accent">Caster</span>
                         </div>
                         <span class="text-xs text-base-content/50">[[ hero.cost ]]pts</span>
                     </div>
@@ -1639,7 +1704,7 @@ document.addEventListener("DOMContentLoaded", () => {
             isMine: { type: Boolean, default: false },
             showToast: { type: Function, default: () => {} },
         },
-        emits: ['update', 'open-action-modal'],
+        emits: ['update', 'open-action-modal', 'open-cast-modal'],
         setup(props, { emit }) {
             const store = GameStore;
             const showDetails = ref(false);
@@ -1774,15 +1839,40 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (desc) return desc.length > 60 ? desc.slice(0, 57) + '…' : desc;
                 return '';
             };
+            const isFlavorCasterName = (name) => {
+                if (!name || typeof name !== 'string') return false;
+                const n = name.trim().toLowerCase();
+                return n.includes('caster') && /caster\s*\(\s*\d+\s*\)/.test(n);
+            };
             const getRulesForUnit = (unit) => {
                 const rules = unit && unit.rules;
-                if (!rules || !Array.isArray(rules)) return [];
-                return rules.map(r => {
+                const fromRules = (rules && Array.isArray(rules)) ? rules : [];
+                const displayName = ((unit.custom_name || unit.name) || '').toLowerCase();
+                const nameHasCaster = displayName.includes('caster');
+                const ruleTexts = fromRules.map(r => {
                     if (typeof r === 'string') return r;
                     const name = (r && (r.name || r.label)) || '';
                     const rating = r && r.rating != null && r.rating !== '' ? r.rating : null;
                     return rating != null ? `${name}(${rating})` : name;
-                }).filter(Boolean);
+                }).filter((text) => {
+                    if (!text) return false;
+                    if (!nameHasCaster) return true;
+                    const t = text.toLowerCase().trim();
+                    if (t === 'caster' || /^caster\s*\(\s*\d+\s*\)\s*$/.test(t)) return false;
+                    return true;
+                });
+                const loadout = unit && unit.loadout;
+                if (loadout && Array.isArray(loadout)) {
+                    const collectFlavorFromLoadout = (items) => {
+                        for (const item of items) {
+                            const name = (item && (item.label || item.name)) || '';
+                            if (isFlavorCasterName(name)) ruleTexts.push(name.trim());
+                            if (item && item.content && Array.isArray(item.content)) collectFlavorFromLoadout(item.content);
+                        }
+                    };
+                    collectFlavorFromLoadout(loadout);
+                }
+                return ruleTexts;
             };
             const getLoadoutForUnit = (unit) => {
                 const loadout = unit && unit.loadout;
@@ -1791,13 +1881,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 const process = (items) => {
                     for (const item of items) {
                         const name = item.label || item.name || 'Weapon';
+                        if (isFlavorCasterName(name)) continue;
                         const range = item.range != null ? `${item.range}"` : '';
                         const attacks = item.attacks != null ? `A${item.attacks}` : '';
-                        const rules = (item.specialRules || []).map(sr => {
-                            const n = (sr && (sr.name || sr.label)) || '';
-                            const r = sr && sr.rating != null && sr.rating !== '' ? sr.rating : null;
-                            return r != null ? `${n}(${r})` : n;
-                        }).filter(Boolean);
+                        const rules = (item.specialRules || [])
+                            .filter(sr => (sr && (sr.name || sr.label) || '').toString().toLowerCase().trim() !== 'caster')
+                            .map(sr => {
+                                const n = (sr && (sr.name || sr.label)) || '';
+                                const r = sr && sr.rating != null && sr.rating !== '' ? sr.rating : null;
+                                return r != null ? `${n}(${r})` : n;
+                            }).filter(Boolean);
                         const rulesStr = rules.length ? ` [${rules.join(', ')}]` : '';
                         out.push({ displayText: [name, range, attacks].filter(Boolean).join(' ') + rulesStr });
                         if (item.content && Array.isArray(item.content)) process(item.content);
@@ -2012,6 +2105,21 @@ document.addEventListener("DOMContentLoaded", () => {
             const selectedUnitForAction = ref(null);
             const selectedAction = ref(null);
             const selectedTargets = ref([]);
+            const showCastModal = ref(false);
+            const selectedUnitForCast = ref(null);
+            const castSpellValue = ref(1);
+            const castSpellName = ref('');
+            const castRollModifier = ref(null);
+            const castTargetUnitId = ref(null);
+            const selectedCastSpell = ref(null);
+            const DEFAULT_SPELLS = [
+                { name: 'Smite', cost: 1, description: 'Target takes 1 hit at AP(1).' },
+                { name: 'Heal', cost: 1, description: 'Target regains 1 wound (max starting).' },
+                { name: 'Psychic Barrier', cost: 2, description: 'Target gets +1 Defense until end of round.' },
+                { name: 'Mind Blast', cost: 2, description: 'Target takes 1 hit at AP(2).' },
+                { name: 'Warp Storm', cost: 3, description: 'Target unit takes D3 hits at AP(1).' },
+                { name: 'Fortune', cost: 3, description: 'Target may re-roll one failed roll until end of round.' },
+            ];
             const showClearLogModal = ref(false);
             const isClearingLog = ref(false);
             const opponentNameEdit = ref('');
@@ -2151,6 +2259,62 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedAction.value = null;
                 selectedTargets.value = [];
                 showActionModal.value = true;
+            };
+            const getSpellsForCaster = (unit) => {
+                if (!unit) return DEFAULT_SPELLS;
+                const player = players.value.find(p => String(p.id) === String(unit.player_id));
+                const list = player?.spells;
+                if (list && Array.isArray(list) && list.length > 0) return list;
+                return DEFAULT_SPELLS;
+            };
+            const selectCastSpell = (spell) => {
+                const u = getUnitForCast();
+                const tokens = u?.state?.spell_tokens ?? 0;
+                const cost = spell?.cost ?? 1;
+                if (tokens >= cost) selectedCastSpell.value = spell;
+            };
+            const openCastModal = (unitId) => {
+                selectedUnitForCast.value = unitId;
+                selectedCastSpell.value = null;
+                castSpellValue.value = 1;
+                castSpellName.value = '';
+                castRollModifier.value = null;
+                castTargetUnitId.value = null;
+                showCastModal.value = true;
+            };
+            const getUnitForCast = () => {
+                if (!selectedUnitForCast.value) return null;
+                return units.value.find(u => String(u.id) === String(selectedUnitForCast.value));
+            };
+            const closeCastModal = () => {
+                showCastModal.value = false;
+                selectedUnitForCast.value = null;
+            };
+            const attemptCastSubmit = async () => {
+                if (!selectedUnitForCast.value || !game.value?.code) return;
+                const u = getUnitForCast();
+                const cost = selectedCastSpell.value ? selectedCastSpell.value.cost : castSpellValue.value;
+                const name = selectedCastSpell.value ? selectedCastSpell.value.name : (castSpellName.value || undefined);
+                if (!u || (u.state?.spell_tokens ?? 0) < cost) {
+                    showToast('Not enough spell tokens');
+                    return;
+                }
+                if (selectedCastSpell.value && !name) {
+                    showToast('Select a spell');
+                    return;
+                }
+                try {
+                    await store.actions.attemptCast(game.value.code, selectedUnitForCast.value, {
+                        spell_value: cost,
+                        spell_name: name,
+                        target_unit_id: castTargetUnitId.value || undefined,
+                        roll_modifier: castRollModifier.value != null ? castRollModifier.value : undefined,
+                    });
+                    showToast('Spell cast: see event log', 'success');
+                    closeCastModal();
+                } catch (err) {
+                    showToast(err.message || 'Cast failed');
+                }
             };
             
             const selectAction = (action) => {
@@ -3046,6 +3210,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedUnitForAction,
                 selectedAction,
                 selectedTargets,
+                showCastModal,
+                selectedUnitForCast,
+                castSpellValue,
+                castSpellName,
+                castRollModifier,
+                castTargetUnitId,
+                selectedCastSpell,
+                getSpellsForCaster,
+                selectCastSpell,
                 showClearLogModal,
                 isClearingLog,
                 toasts,
@@ -3083,6 +3256,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 getAttachedHeroesForUnit,
                 getActionButtonText,
                 openActionModal,
+                openCastModal,
+                getUnitForCast,
+                closeCastModal,
+                attemptCastSubmit,
                 selectAction,
                 toggleTarget,
                 logUnitAction,

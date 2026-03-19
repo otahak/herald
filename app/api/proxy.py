@@ -170,6 +170,110 @@ def parse_special_rules(rules: List[dict]) -> dict:
     return result
 
 
+def _caster_level_from_loadout_item(item: dict) -> int:
+    """Extract caster level from a loadout item name like Caster(2) or Technomancer (Caster(2))."""
+    name = (item.get("name") or item.get("label") or "").strip()
+    m = re.search(r"caster\s*\(\s*(\d+)\s*\)", name, re.I)
+    return int(m.group(1)) if m else 1
+
+
+def _is_flavor_caster_name(name: str) -> bool:
+    """True if name is a flavor title with (Caster(N)), e.g. 'Technomancer (Caster(2))'."""
+    if not name or not name.strip():
+        return False
+    n = name.strip().lower()
+    return "caster" in n and bool(re.search(r"caster\s*\(\s*\d+\s*\)", n))
+
+
+def parse_loadout_for_caster(loadout: list) -> tuple:
+    """
+    Treat Caster as a skill like Hero, Tough(X), etc.
+    Returns (is_caster, caster_level, loadout_cleaned, rules_to_add).
+    - Purely "Caster" / "Caster(N)" items: remove from loadout.
+    - Flavor items like "Technomancer (Caster(2))": remove from loadout and add to rules_to_add
+      so they display in the Rules section as "Technomancer (Caster(2))".
+    - specialRules Caster on other items: strip from that item, set is_caster.
+    """
+    if not loadout or not isinstance(loadout, list):
+        return False, 0, loadout or [], []
+    is_caster_ref = [False]
+    caster_level_ref = [0]
+    rules_to_add: list = []
+
+    def walk(items: list) -> list:
+        out = []
+        for item in (i for i in items if isinstance(i, dict)):
+            name = (item.get("name") or item.get("label") or "").strip()
+            name_lower = name.lower()
+            # Purely caster-only item: remove from loadout
+            if name_lower == "caster" or re.match(r"^caster\s*\(\s*\d+\s*\)\s*$", name_lower):
+                is_caster_ref[0] = True
+                caster_level_ref[0] = max(caster_level_ref[0], _caster_level_from_loadout_item(item))
+                continue
+            # Flavor title with (Caster(N)): move to Rules, remove from loadout
+            if _is_flavor_caster_name(name):
+                is_caster_ref[0] = True
+                caster_level_ref[0] = max(caster_level_ref[0], _caster_level_from_loadout_item(item))
+                rules_to_add.append({"name": name, "rating": None})  # display as "Technomancer (Caster(2))"
+                continue
+            # Strip Caster from specialRules so equipment doesn't show [Caster(2)]
+            special_rules = item.get("specialRules")
+            if special_rules:
+                cleaned = []
+                for r in special_rules:
+                    if isinstance(r, dict) and (r.get("name") or r.get("label") or "").strip().lower() == "caster":
+                        is_caster_ref[0] = True
+                        caster_level_ref[0] = max(caster_level_ref[0], int(r.get("rating")) if r.get("rating") is not None else 1)
+                    else:
+                        cleaned.append(r)
+                if len(cleaned) != len(special_rules):
+                    item = {**item, "specialRules": cleaned}
+            content = item.get("content")
+            if content and isinstance(content, list):
+                item = {**item, "content": walk(content)}
+            out.append(item)
+        return out
+
+    filtered = walk(loadout)
+    return is_caster_ref[0], caster_level_ref[0], filtered, rules_to_add
+
+
+def parse_upgrades_for_caster(upgrades: list) -> tuple:
+    """
+    Check selectedUpgrades for Caster (e.g. upgrade name "Caster(2)" or upgrade granting Caster rule).
+    Returns (is_caster, caster_level).
+    """
+    if not upgrades or not isinstance(upgrades, list):
+        return False, 0
+    is_caster = False
+    caster_level = 0
+
+    def check_item(item: dict) -> None:
+        nonlocal is_caster, caster_level
+        if not isinstance(item, dict):
+            return
+        name = (item.get("name") or item.get("label") or "").strip()
+        name_lower = name.lower()
+        if name_lower == "caster" or re.match(r"^caster\s*\(\s*\d+\s*\)\s*$", name_lower):
+            is_caster = True
+            caster_level = max(caster_level, _caster_level_from_loadout_item(item))
+        elif _is_flavor_caster_name(name):
+            is_caster = True
+            caster_level = max(caster_level, _caster_level_from_loadout_item({"name": name, "label": name}))
+        for key in ("rules", "effects", "options", "choices", "content"):
+            for sub in (item.get(key) or []):
+                if isinstance(sub, dict):
+                    n = (sub.get("name") or sub.get("label") or "").strip().lower()
+                    if n == "caster":
+                        is_caster = True
+                        caster_level = max(caster_level, int(sub.get("rating")) if sub.get("rating") is not None else 1)
+                    check_item(sub)
+
+    for up in upgrades:
+        check_item(up)
+    return is_caster, caster_level
+
+
 async def log_event(
     session: AsyncSession,
     game: Game,
@@ -359,9 +463,23 @@ class ProxyController(Controller):
         
         for unit_data in units_data:
             try:
-                # Parse special rules
+                # Parse special rules (from rules array)
                 rules = unit_data.get("rules", [])
                 props = parse_special_rules(rules)
+                # Caster can appear in loadout in Army Forge; treat as skill and move to Rules
+                loadout_raw = unit_data.get("loadout", [])
+                loadout_is_caster, loadout_caster_level, loadout_filtered, rules_from_loadout = parse_loadout_for_caster(loadout_raw)
+                upgrades_raw = unit_data.get("selectedUpgrades") or []
+                upgrade_is_caster, upgrade_caster_level = parse_upgrades_for_caster(upgrades_raw)
+                if loadout_is_caster or upgrade_is_caster:
+                    props["is_caster"] = True
+                    props["caster_level"] = max(
+                        props["caster_level"] or 0,
+                        loadout_caster_level or 0,
+                        upgrade_caster_level or 0,
+                        1,
+                    )
+                rules = rules + rules_from_loadout
                 
                 unit_name = unit_data.get("name", "Unknown Unit")
                 logger.debug(f"Creating unit: {unit_name} (Q{unit_data.get('quality', 4)}+ D{unit_data.get('defense', 4)}+)")
@@ -376,7 +494,7 @@ class ProxyController(Controller):
                     size=unit_data.get("size", 1),
                     tough=props["tough"],
                     cost=unit_data.get("cost", 0),
-                    loadout=unit_data.get("loadout"),
+                    loadout=loadout_filtered,
                     rules=rules,
                     upgrades=unit_data.get("selectedUpgrades"),
                     army_forge_id=unit_data.get("id"),
@@ -457,6 +575,13 @@ class ProxyController(Controller):
         player.army_forge_list_id = list_id
         army_name = f"Imported Army ({units_created} units)"
         player.army_name = army_name
+        # Import spells if Army Forge provides them (list of {name, cost, description})
+        spells_raw = army_data.get("spells")
+        if isinstance(spells_raw, list) and len(spells_raw) > 0:
+            player.spells = [
+                {"name": s.get("name", ""), "cost": int(s.get("cost", s.get("value", 1))), "description": s.get("description", s.get("text", ""))}
+                for s in spells_raw if isinstance(s, dict)
+            ] or None
         # Accumulate units and points instead of replacing
         player.starting_unit_count = (player.starting_unit_count or 0) + units_created
         player.starting_points = (player.starting_points or 0) + total_points

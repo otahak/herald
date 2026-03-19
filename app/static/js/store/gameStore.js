@@ -581,6 +581,41 @@ const GameStore = {
         },
         
         /**
+         * Attempt to cast a spell (during activation, before attacks). Caster(X): spend tokens >= spell value, roll 4+.
+         * @param {string} code - Game code
+         * @param {string} unitId - Caster unit ID
+         * @param {object} options - { spell_value, spell_name?, target_unit_id?, roll_modifier? }
+         */
+        async attemptCast(code, unitId, options = {}) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const body = {
+                    spell_value: options.spell_value,
+                    spell_name: options.spell_name || null,
+                    target_unit_id: options.target_unit_id || null,
+                    roll_modifier: options.roll_modifier != null ? options.roll_modifier : null,
+                };
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/cast`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to cast spell');
+                }
+                const result = await response.json();
+                await this.fetchGame(code);
+                await this.fetchEvents();
+                this.broadcastStateUpdate({ type: 'spell_cast', unit_id: unitId, success: result.success });
+                return result;
+            } catch (error) {
+                Debug.error('Spell cast failed (non-critical):', error.message);
+                throw error;
+            }
+        },
+        
+        /**
          * Update objective state
          */
         async updateObjective(objectiveId, status, controlledById = null) {

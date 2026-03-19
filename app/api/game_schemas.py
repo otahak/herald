@@ -61,6 +61,19 @@ class LogUnitActionRequest(BaseModel):
     )
 
 
+class CastSpellRequest(BaseModel):
+    """Request to attempt a spell cast (during activation, before attacks)."""
+    spell_value: int = Field(ge=1, le=6, description="Token cost of the spell")
+    spell_name: Optional[str] = Field(default=None, max_length=100, description="Spell name for log")
+    target_unit_id: Optional[uuid.UUID] = Field(default=None, description="Target unit if applicable")
+    roll_modifier: Optional[int] = Field(
+        default=None,
+        ge=-3,
+        le=3,
+        description="Modifier to cast roll (e.g. +1 or -1 per allied token spent)",
+    )
+
+
 class UpdateObjectiveRequest(BaseModel):
     """Request to update an objective's state."""
     status: ObjectiveStatus
@@ -161,6 +174,7 @@ class PlayerResponse(BaseModel):
     starting_unit_count: int
     starting_points: int
     victory_points: int
+    spells: Optional[List[Any]] = None  # List of {name, cost, description} for casters
 
     class Config:
         from_attributes = True

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import random
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -30,6 +31,7 @@ from app.models import (
 )
 from app.api.websocket import broadcast_to_game
 from app.utils.logging import error_log
+from app.utils.unit_stats import get_effective_caster
 from app.api.proxy import parse_special_rules
 from app.api.game_schemas import (
     CreateGameRequest,
@@ -37,6 +39,7 @@ from app.api.game_schemas import (
     UpdateGameStateRequest,
     UpdateUnitStateRequest,
     LogUnitActionRequest,
+    CastSpellRequest,
     UpdateObjectiveRequest,
     CreateObjectivesRequest,
     UpdateVictoryPointsRequest,
@@ -70,6 +73,16 @@ logger = logging.getLogger("Herald.games")
 
 # Re-export for backwards compatibility (e.g. websocket may import get_game_by_code from here)
 __all__ = ["GamesController", "get_game_by_code", "broadcast_if_not_solo", "log_event", "check_and_update_expiration"]
+
+
+def _unit_response_with_effective_caster(unit: Unit) -> UnitResponse:
+    """Build UnitResponse with is_caster/caster_level from DB or from rules/loadout/upgrades."""
+    resp = UnitResponse.model_validate(unit)
+    effective_caster, effective_level = get_effective_caster(unit)
+    resp.is_caster = effective_caster
+    if effective_caster:
+        resp.caster_level = effective_level or resp.caster_level or 1
+    return resp
 
 
 # --- Controller ---
@@ -173,7 +186,7 @@ class GamesController(Controller):
             units.extend(player.units)
         
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response
     
     @post("/{code:str}/join")
@@ -245,7 +258,7 @@ class GamesController(Controller):
             units.extend(p.units)
         
         response = JoinGameResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         response.your_player_id = str(player_id)  # Tell client which player they are
         return response
     
@@ -317,7 +330,7 @@ class GamesController(Controller):
             units.extend(p.units)
         
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response
     
     @patch("/{code:str}/state")
@@ -678,7 +691,7 @@ class GamesController(Controller):
             }
         })
         
-        return UnitResponse.model_validate(unit)
+        return _unit_response_with_effective_caster(unit)
     
     @post("/{code:str}/units/manual")
     async def create_unit_manually(
@@ -1033,7 +1046,7 @@ class GamesController(Controller):
             }
         })
         
-        return UnitResponse.model_validate(unit)
+        return _unit_response_with_effective_caster(unit)
     
     @post("/{code:str}/units/{unit_id:uuid}/actions")
     async def log_unit_action(
@@ -1069,6 +1082,10 @@ class GamesController(Controller):
             
             if not unit.state:
                 raise ValidationException("Unit has no state (not initialized)")
+            
+            # Shaken units can only Hold (idle to recover); cannot use other actions or cast
+            if unit.state.is_shaken and data.action.lower() != "hold":
+                raise ValidationException("Shaken units can only Hold (idle to recover).")
             
             # Validate action type
             valid_actions = ["rush", "advance", "hold", "charge", "attack"]
@@ -1203,6 +1220,88 @@ class GamesController(Controller):
                 }
             )
             raise
+    
+    @post("/{code:str}/units/{unit_id:uuid}/cast")
+    async def attempt_cast(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        data: CastSpellRequest,
+        session: AsyncSession,
+    ) -> dict:
+        """Attempt to cast a spell (during activation, before attacks). Caster(X): spend tokens >= spell value, roll 4+."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        game.last_activity_at = datetime.now(timezone.utc)
+        
+        unit = None
+        unit_player_id = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    unit_player_id = player.id
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        if not unit.state:
+            raise ValidationException("Unit has no state")
+        effective_caster, _ = get_effective_caster(unit)
+        if not effective_caster:
+            raise ValidationException("Unit is not a caster")
+        if unit.state.is_shaken:
+            raise ValidationException("Shaken units cannot cast spells")
+        if unit.state.spell_tokens < data.spell_value:
+            raise ValidationException(
+                f"Not enough spell tokens: need {data.spell_value}, have {unit.state.spell_tokens}"
+            )
+        
+        modifier = data.roll_modifier if data.roll_modifier is not None else 0
+        roll = random.randint(1, 6)
+        success = (roll + modifier) >= 4
+        
+        unit.state.spell_tokens -= data.spell_value
+        
+        spell_label = data.spell_name or f"Spell ({data.spell_value})"
+        target_desc = ""
+        if data.target_unit_id:
+            for p in game.players:
+                for u in p.units:
+                    if u.id == data.target_unit_id:
+                        target_desc = f" on {u.display_name}"
+                        break
+        
+        result_desc = "succeeded" if success else "failed"
+        mod_str = f"+{modifier}" if modifier > 0 else (f"{modifier}" if modifier < 0 else "")
+        description = f"{unit.display_name} cast {spell_label}{target_desc}: roll {roll}{mod_str} → {result_desc}"
+        
+        await log_event(
+            session,
+            game,
+            EventType.SPELL_CAST,
+            description,
+            player_id=unit_player_id,
+            target_unit_id=data.target_unit_id,
+            details={
+                "spell_value": data.spell_value,
+                "spell_name": data.spell_name,
+                "roll": roll,
+                "roll_modifier": modifier,
+                "success": success,
+                "tokens_remaining": unit.state.spell_tokens,
+            },
+        )
+        await session.commit()
+        
+        await broadcast_if_not_solo(game, code, {
+            "type": "state_update",
+            "data": {
+                "reason": "spell_cast",
+                "unit_id": str(unit_id),
+                "success": success,
+            },
+        })
+        return {"success": success, "message": description, "roll": roll, "roll_modifier": modifier}
     
     @patch("/{code:str}/objectives/{objective_id:uuid}")
     async def update_objective(
@@ -1561,6 +1660,12 @@ class GamesController(Controller):
         
         # Log event or delete log entry
         if data.delta > 0:
+            # New round: reset activations and grant caster spell tokens
+            for player in game.players:
+                player.has_finished_activations = False
+                for unit in player.units:
+                    if unit.state:
+                        unit.state.reset_for_new_round()
             # Round increased: Create log entry
             await log_event(
                 session, game,
@@ -1615,7 +1720,7 @@ class GamesController(Controller):
         units = []
         for p in game.players:
             units.extend(p.units)
-        game_response.units = [UnitResponse.model_validate(u) for u in units]
+        game_response.units = [_unit_response_with_effective_caster(u) for u in units]
         
         # Serialize to JSON
         game_state_json = json.dumps(game_response.model_dump(), default=str)
@@ -1817,5 +1922,5 @@ class GamesController(Controller):
         for p in game.players:
             units.extend(p.units)
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response
