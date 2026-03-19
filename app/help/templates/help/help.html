@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+{% block title %}Herald - Help & FAQ{% endblock %}
+
+{% block head %}
+<style>
+.help-section { scroll-margin-top: 5rem; }
+.toc a { transition: color 0.15s; }
+.toc a:hover { color: oklch(var(--p)); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+
+    <div class="text-center mb-10">
+        <h1 class="text-3xl font-bold mb-2">Help & FAQ</h1>
+        <p class="text-base-content/70">Everything you need to know to get started with Herald.</p>
+    </div>
+
+    <!-- Table of Contents -->
+    <div class="card bg-base-200 mb-8">
+        <div class="card-body toc">
+            <h2 class="card-title text-lg">Contents</h2>
+            <ul class="list-disc list-inside space-y-1 text-sm">
+                <li><a href="#what-is-herald">What is Herald?</a></li>
+                <li><a href="#getting-started">Getting Started</a></li>
+                <li><a href="#importing-armies">Importing Armies from Army Forge</a></li>
+                <li><a href="#game-flow">Game Flow</a></li>
+                <li><a href="#unit-actions">Unit Actions</a></li>
+                <li><a href="#spell-casting">Spell Casting</a></li>
+                <li><a href="#transports">Transports (Embark / Disembark)</a></li>
+                <li><a href="#special-deployment">Special Deployment (Scout / Ambush)</a></li>
+                <li><a href="#morale-shaken">Morale & Shaken Units</a></li>
+                <li><a href="#unit-management">Unit Management</a></li>
+                <li><a href="#saving-loading">Saving & Loading</a></li>
+                <li><a href="#multiplayer">Multiplayer & Solo Mode</a></li>
+                <li><a href="#tips">Tips & Shortcuts</a></li>
+                <li><a href="#faq">FAQ</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- What is Herald? -->
+    <section id="what-is-herald" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">What is Herald?</h2>
+        <p class="mb-2">
+            Herald is a digital scoreboard and game tracker for
+            <strong>OnePageRules</strong> tabletop games (Grimdark Future, Age of Fantasy, etc.).
+            It keeps track of rounds, activations, victory points, wounds, spell tokens, and more
+            so you can focus on playing instead of bookkeeping.
+        </p>
+        <p>
+            Herald is <em>not</em> a rules engine &mdash; it does not roll dice or enforce rules for you.
+            It records your actions and provides quick-reference information like rules text,
+            spells, and unit stats so you don't have to keep switching tabs to Army Forge.
+        </p>
+    </section>
+
+    <!-- Getting Started -->
+    <section id="getting-started" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Getting Started</h2>
+        <div class="steps steps-vertical">
+            <div class="step step-primary">
+                <div class="text-left ml-4">
+                    <strong>Create or Join a Game</strong>
+                    <p class="text-sm text-base-content/70">
+                        From the home page, choose <em>Create Game</em> (enter a game name, your player name,
+                        and pick a color) or <em>Join Game</em> (enter the game code shared by the host).
+                    </p>
+                </div>
+            </div>
+            <div class="step step-primary">
+                <div class="text-left ml-4">
+                    <strong>Import Your Army</strong>
+                    <p class="text-sm text-base-content/70">
+                        Paste your Army Forge share link or list ID into the import field.
+                        Herald will pull in all your units, spells, faction rules, and special abilities.
+                    </p>
+                </div>
+            </div>
+            <div class="step step-primary">
+                <div class="text-left ml-4">
+                    <strong>Start the Game</strong>
+                    <p class="text-sm text-base-content/70">
+                        Once both players have imported their armies, the host clicks <em>Start Game</em>.
+                        The board view appears and tracking begins at Round 1.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Importing Armies -->
+    <section id="importing-armies" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Importing Armies from Army Forge</h2>
+        <div class="space-y-3 text-sm">
+            <p>
+                Herald integrates directly with the
+                <a href="https://army-forge.onepagerules.com" target="_blank" class="link link-primary">
+                    Army Forge</a> list builder.
+            </p>
+            <ol class="list-decimal list-inside space-y-2">
+                <li>Open your list in Army Forge and click <strong>Share</strong>.</li>
+                <li>Copy the share URL (looks like <code>https://army-forge.onepagerules.com/share?id=XXXXX</code>).</li>
+                <li>In Herald, paste the URL into the <em>Army Forge URL / List ID</em> field and click <strong>Import Army</strong>.</li>
+            </ol>
+            <div class="alert alert-info text-xs">
+                <div>
+                    <strong>What gets imported:</strong> units (with loadouts, rules, and notes),
+                    spells, faction special rules, faction name, and caster levels.
+                    You can re-import or import a second list to combine armies.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Game Flow -->
+    <section id="game-flow" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Game Flow</h2>
+        <div class="space-y-3 text-sm">
+            <p>Herald follows the standard OPR activation-based turn structure:</p>
+            <ol class="list-decimal list-inside space-y-2">
+                <li><strong>Round starts.</strong> Spell tokens are automatically added to caster units.</li>
+                <li><strong>Players alternate activations.</strong> Select a unit, choose an action
+                    (Hold, Advance, Rush, Charge), then resolve attacks, spells, etc.</li>
+                <li><strong>Once both players have activated all units (or passed),</strong>
+                    click the <em>End Round</em> button to advance to the next round.</li>
+                <li>Repeat until the game ends (typically after 4 rounds).</li>
+            </ol>
+            <p>
+                The <strong>End Round</strong> button is the large button at the bottom of the screen.
+                It resets all unit activations and increments the round counter.
+            </p>
+        </div>
+    </section>
+
+    <!-- Unit Actions -->
+    <section id="unit-actions" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Unit Actions</h2>
+        <div class="overflow-x-auto">
+            <div class="space-y-2 text-sm">
+                <div class="flex gap-2 items-start">
+                    <span class="badge badge-neutral min-w-[5rem]">Hold</span>
+                    <span>Unit stays still. Can shoot and cast spells. Required for Artillery and Shaken units.</span>
+                </div>
+                <div class="flex gap-2 items-start">
+                    <span class="badge badge-neutral min-w-[5rem]">Advance</span>
+                    <span>Move up to base movement. Can shoot (at -1 to hit) and cast spells. Required for Aircraft.</span>
+                </div>
+                <div class="flex gap-2 items-start">
+                    <span class="badge badge-neutral min-w-[5rem]">Rush</span>
+                    <span>Move up to double base movement. Cannot shoot or charge.</span>
+                </div>
+                <div class="flex gap-2 items-start">
+                    <span class="badge badge-neutral min-w-[5rem]">Charge</span>
+                    <span>Move into melee range (up to 12&Prime;). Fight in melee. Can cast spells before charging.</span>
+                </div>
+            </div>
+        </div>
+        <p class="text-sm text-base-content/70 mt-3">
+            After choosing an action, you can record attacks, spell casts, wounds taken, etc.
+            Herald tracks activation status so you know which units still need to go.
+        </p>
+    </section>
+
+    <!-- Spell Casting -->
+    <section id="spell-casting" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Spell Casting</h2>
+        <div class="space-y-3 text-sm">
+            <p>
+                Units with the <strong>Caster</strong> rule receive spell tokens at the start of each round
+                (equal to their caster level). Tokens accumulate up to a maximum of 6.
+            </p>
+            <ol class="list-decimal list-inside space-y-2">
+                <li>Select the caster unit and click <strong>Cast Spell</strong>.</li>
+                <li>Choose a spell from the list. Each spell shows its <strong>token cost</strong>
+                    and <strong>casting roll</strong> needed (e.g., "1 token, 4+").</li>
+                <li>Roll the dice yourself. Click <strong>Success</strong> or <strong>Failure</strong>
+                    to record the result.</li>
+            </ol>
+            <div class="alert alert-warning text-xs">
+                <div>
+                    <strong>Remember:</strong> Each unit can only cast <em>one</em> spell per activation.
+                    On failure, the tokens are still spent.
+                </div>
+            </div>
+            <p>
+                Spells are imported automatically from Army Forge. You can view all available spells
+                in the collapsible <em>Spells</em> panel under each player's army.
+            </p>
+        </div>
+    </section>
+
+    <!-- Transports -->
+    <section id="transports" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Transports (Embark / Disembark)</h2>
+        <div class="space-y-3 text-sm">
+            <p>
+                If your army contains a unit with the <strong>Transport</strong> rule,
+                Herald provides embark and disembark buttons on eligible unit cards.
+            </p>
+            <ul class="list-disc list-inside space-y-1">
+                <li><strong>Embark:</strong> appears on non-transport units when a transport is available.
+                    Select which transport to board.</li>
+                <li><strong>Disembark:</strong> appears on embarked units. Click to exit the transport.</li>
+                <li><strong>Transport destroyed:</strong> if a transport is destroyed while units are
+                    inside, those units are automatically disembarked, marked as Shaken, and
+                    you'll be reminded to take dangerous terrain tests.</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Special Deployment -->
+    <section id="special-deployment" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Special Deployment (Scout / Ambush)</h2>
+        <div class="space-y-3 text-sm">
+            <p>Herald detects units with Scout or Ambush rules and shows reminders:</p>
+            <ul class="list-disc list-inside space-y-1">
+                <li><strong>Scout:</strong> at the start of Round 1, a banner reminds you to
+                    forward-deploy Scout units up to 12&Prime; from the deployment zone edge.</li>
+                <li><strong>Ambush:</strong> from Round 2 onwards, a banner reminds you that
+                    Ambush units may deploy anywhere over 9&Prime; from enemies.
+                    Use the "Deploy from Ambush" button on the unit card to bring them in.</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Morale & Shaken -->
+    <section id="morale-shaken" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Morale & Shaken Units</h2>
+        <div class="space-y-3 text-sm">
+            <p>
+                Units that lose half or more of their models must take a morale test.
+                Herald displays the morale threshold on each unit card (e.g., "Morale &lt;3"
+                for a 5-model unit).
+            </p>
+            <p>
+                <strong>Shaken</strong> units are restricted to the Hold action only and cannot
+                shoot or charge (but can still cast spells in some cases). They recover at
+                the end of the round if they pass a morale check. Herald tracks Shaken
+                status automatically when you toggle it on the unit card.
+            </p>
+        </div>
+    </section>
+
+    <!-- Unit Management -->
+    <section id="unit-management" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Unit Management</h2>
+        <div class="space-y-3 text-sm">
+            <p><strong>Before the game starts</strong> (in the lobby), you can:</p>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Rename units with custom names for easier identification.</li>
+                <li>Remove units you don't want to use.</li>
+            </ul>
+            <p><strong>During the game</strong>, each unit card shows:</p>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Wounds / model count tracker</li>
+                <li>Activation status (unactivated, activated, action taken)</li>
+                <li>Spell token counter (for casters)</li>
+                <li>Rules with hover/tap tooltips for quick reference</li>
+                <li>Unit notes (if present from Army Forge)</li>
+                <li>Embark/Disembark and deployment controls</li>
+            </ul>
+            <p>
+                All sections on the board (units, spells, rules, import) are
+                <strong>collapsible</strong> &mdash; click the <code>+</code> / <code>&minus;</code>
+                icons to expand or collapse them.
+            </p>
+        </div>
+    </section>
+
+    <!-- Saving & Loading -->
+    <section id="saving-loading" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Saving & Loading</h2>
+        <div class="space-y-3 text-sm">
+            <p>
+                Herald supports saving and loading game state so you can pause and resume later.
+            </p>
+            <ul class="list-disc list-inside space-y-1">
+                <li><strong>Save:</strong> downloads a JSON file with the full game state.</li>
+                <li><strong>Load:</strong> upload a previously saved JSON file to restore the game.</li>
+            </ul>
+            <p class="text-base-content/70">
+                The save file includes all unit states, spell tokens, round number,
+                victory points, and army data.
+            </p>
+        </div>
+    </section>
+
+    <!-- Multiplayer & Solo -->
+    <section id="multiplayer" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Multiplayer & Solo Mode</h2>
+        <div class="space-y-3 text-sm">
+            <p><strong>Multiplayer:</strong></p>
+            <ul class="list-disc list-inside space-y-1">
+                <li>The host creates a game and shares the game code with the opponent.</li>
+                <li>The opponent enters the code on the <em>Join Game</em> tab.</li>
+                <li>Both players see real-time updates via WebSocket &mdash; no need to refresh.</li>
+            </ul>
+            <p><strong>Solo Mode:</strong></p>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Check <em>Solo Play Mode</em> when creating a game.</li>
+                <li>You control both armies from a single browser window.</li>
+                <li>Great for learning the app or testing army lists.</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Tips -->
+    <section id="tips" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">Tips & Shortcuts</h2>
+        <div class="space-y-3 text-sm">
+            <ul class="list-disc list-inside space-y-2">
+                <li><strong>Hover over rule names</strong> on unit cards to see the full rules text
+                    in a tooltip. On mobile, tap and hold.</li>
+                <li><strong>Collapse sections</strong> you don't need to reduce clutter during play.</li>
+                <li><strong>Re-import</strong> a second Army Forge list on the same player to combine
+                    armies (e.g., allied detachments). Spells and rules are merged without duplicates.</li>
+                <li><strong>Victory points</strong> can be adjusted at any time using the
+                    +/&minus; buttons on each player's panel.</li>
+                <li><strong>Activity log</strong> at the bottom of the board shows a history of
+                    all actions, spell casts, and status changes for the game.</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="help-section mb-8">
+        <h2 class="text-2xl font-bold mb-3">FAQ</h2>
+        <div class="space-y-4">
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    Where do I get my Army Forge share link?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Go to <a href="https://army-forge.onepagerules.com" target="_blank"
+                        class="link link-primary">army-forge.onepagerules.com</a>,
+                        open or create your list, then click the <strong>Share</strong> button.
+                        Copy the URL from your browser's address bar.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    My spells aren't showing up after import. What's wrong?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Spells are fetched from the Army Forge army book API. Make sure you're
+                        using a standard (non-custom) faction. If the problem persists,
+                        try re-importing the list. Spells appear in the collapsible
+                        <em>Spells</em> section under each player.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    Does Herald roll dice or enforce rules?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        No. Herald is a tracking and reference tool. You roll your own dice
+                        and make your own decisions &mdash; Herald records the outcomes and
+                        provides rule references to help you play faster.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    Can I use Herald on my phone?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Yes. Herald is designed to work on mobile browsers. The layout adjusts
+                        for smaller screens, and all interactions work with touch.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    How do I track wounds / remove models?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Each unit card has a wound counter. Use the +/&minus; buttons to adjust
+                        wounds. When a unit reaches zero models, you can mark it as destroyed.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    What happens if my transport is destroyed with units inside?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Herald automatically disembarks all passengers, marks them as Shaken,
+                        and prompts you to take dangerous terrain tests for each one.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    Can I combine multiple Army Forge lists for one player?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Yes. Import a second list for the same player and Herald will merge
+                        the units, spells, and faction rules together without duplicates.
+                    </p>
+                </div>
+            </div>
+
+            <div tabindex="0" class="collapse collapse-arrow bg-base-200">
+                <div class="collapse-title font-medium">
+                    Is my game data stored on a server?
+                </div>
+                <div class="collapse-content text-sm">
+                    <p>
+                        Game data is stored on the server for the duration of the session
+                        and for multiplayer sync. You can also save/load games as local JSON files
+                        for long-term storage.
+                    </p>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- Back to top -->
+    <div class="text-center mt-8 mb-4">
+        <a href="#" class="btn btn-ghost btn-sm">Back to top</a>
+    </div>
+
+</div>
+{% endblock %}

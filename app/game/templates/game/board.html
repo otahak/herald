@@ -314,7 +314,10 @@
                             <div v-for="spell in getPlayerSpells(leftPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
                                 <div class="flex justify-between items-start">
                                     <span class="font-semibold">[[ spell.name ]]</span>
-                                    <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                    <div class="flex gap-1">
+                                        <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                        <span v-if="spell.casting_roll" class="badge badge-xs badge-outline">[[ spell.casting_roll ]]+</span>
+                                    </div>
                                 </div>
                                 <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
                             </div>
@@ -691,7 +694,10 @@
                             <div v-for="spell in getPlayerSpells(rightPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
                                 <div class="flex justify-between items-start">
                                     <span class="font-semibold">[[ spell.name ]]</span>
-                                    <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                    <div class="flex gap-1">
+                                        <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
+                                        <span v-if="spell.casting_roll" class="badge badge-xs badge-outline">[[ spell.casting_roll ]]+</span>
+                                    </div>
                                 </div>
                                 <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
                             </div>
@@ -1443,7 +1449,7 @@
             </h3>
             <p class="text-sm text-base-content/70 mb-3">
                 Tokens: [[ getUnitForCast()?.state?.spell_tokens ?? 0 ]] / 6.
-                Select a spell, then roll 4+ and record the result.
+                Select a spell, then roll to cast and record the result.
             </p>
             <div class="flex-1 overflow-y-auto mb-4">
                 <div class="space-y-2">
@@ -1457,7 +1463,10 @@
                         <div class="card-body p-3">
                             <div class="flex justify-between items-start">
                                 <span class="font-semibold">[[ spell.name ]]</span>
-                                <span class="badge badge-sm">[[ spell.cost ?? 1 ]] token[[ (spell.cost ?? 1) !== 1 ? 's' : '' ]]</span>
+                                <div class="flex gap-1">
+                                    <span class="badge badge-sm">[[ spell.cost ?? 1 ]] token[[ (spell.cost ?? 1) !== 1 ? 's' : '' ]]</span>
+                                    <span v-if="spell.casting_roll" class="badge badge-sm badge-outline">[[ spell.casting_roll ]]+</span>
+                                </div>
                             </div>
                             <p v-if="spell.description" class="text-xs text-base-content/70 mt-1">[[ spell.description ]]</p>
                         </div>
@@ -2417,12 +2426,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const castTargetUnitId = ref(null);
             const selectedCastSpell = ref(null);
             const DEFAULT_SPELLS = [
-                { name: 'Smite', cost: 1, description: 'Target takes 1 hit at AP(1).' },
-                { name: 'Heal', cost: 1, description: 'Target regains 1 wound (max starting).' },
-                { name: 'Psychic Barrier', cost: 2, description: 'Target gets +1 Defense until end of round.' },
-                { name: 'Mind Blast', cost: 2, description: 'Target takes 1 hit at AP(2).' },
-                { name: 'Warp Storm', cost: 3, description: 'Target unit takes D3 hits at AP(1).' },
-                { name: 'Fortune', cost: 3, description: 'Target may re-roll one failed roll until end of round.' },
+                { name: 'Smite', cost: 1, casting_roll: 4, description: 'Target takes 1 hit at AP(1).' },
+                { name: 'Heal', cost: 1, casting_roll: 4, description: 'Target regains 1 wound (max starting).' },
+                { name: 'Psychic Barrier', cost: 2, casting_roll: 5, description: 'Target gets +1 Defense until end of round.' },
+                { name: 'Mind Blast', cost: 2, casting_roll: 5, description: 'Target takes 1 hit at AP(2).' },
+                { name: 'Warp Storm', cost: 3, casting_roll: 6, description: 'Target unit takes D3 hits at AP(1).' },
+                { name: 'Fortune', cost: 3, casting_roll: 6, description: 'Target may re-roll one failed roll until end of round.' },
             ];
             const showClearLogModal = ref(false);
             const isClearingLog = ref(false);
