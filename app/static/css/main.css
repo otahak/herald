@@ -22,3 +22,14 @@ main {
     flex: 1;
     padding-bottom: 5rem; /* Adequate padding for footer */
 }
+
+/* Mobile: nav and footer safe areas */
+@media (max-width: 768px) {
+    .navbar .container {
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+    }
+    .footer {
+        padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    }
+}
