@@ -345,8 +345,8 @@ class ProxyController(Controller):
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
                     raise ValidationException(
-                        "Army Forge's export service doesn't support this list (e.g. custom/community army books). "
-                        "This is a limitation on Army Forge's side. Use an official list or add units manually."
+                        "Army Forge's export API doesn't support this list (e.g. combined armies like The Ashen Pact, "
+                        "or custom/community books). Use a single-army official list or add units manually."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException as e:
@@ -445,10 +445,11 @@ class ProxyController(Controller):
                     
                     logger.error(f"Army Forge 500 error details: {error_detail}")
                     raise ValidationException(
-                        "Army Forge's export service doesn't support this list. "
-                        "Lists built from custom or community army books often fail here—this is a limitation on Army Forge's side, not something we can fix in Herald. "
-                        "Please use a list from an official army book, or add units manually. "
-                        "You can re-share the list from Army Forge or try another list; if the problem persists, the list type is likely unsupported by their export API."
+                        "Army Forge's export API returned an error for this list. "
+                        "This often affects combined-army lists (e.g. The Ashen Pact), custom/community army books, "
+                        "or lists Army Forge's TTS export doesn't support—a limitation on Army Forge's side. "
+                        "Workaround: add units manually, or try a single-army list from an official book. "
+                        "If you believe this is an official list that should work, please report it to One Page Rules."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException:

@@ -2,7 +2,7 @@
 {% block title %}Herald - Game{% endblock %}
 
 {% block head %}
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <script src="/static/js/store/gameStore.js"></script>
 <style>
 /* Custom styles for game board */
@@ -62,23 +62,24 @@
         border-right: none !important;
         border-left: none !important;
         border-bottom: 1px solid hsl(var(--b3));
-        max-height: 35vh;
-        min-height: 120px;
+        max-height: 42vh;
+        min-height: 140px;
         overflow-y: auto;
         flex: 0 0 auto !important;
+        padding: 0.75rem !important;
     }
     
     .center-panel {
         width: 100% !important;
         order: -1; /* Move center panel to top on mobile */
-        max-height: 45vh;
-        min-height: 160px;
+        max-height: 50vh;
+        min-height: 180px;
         overflow-y: auto !important; /* scroll whole center panel on mobile */
         flex: 0 0 auto !important;
     }
     
     .center-panel .objectives-section {
-        padding: 0.5rem !important;
+        padding: 0.75rem !important;
     }
     
     .center-panel .game-log {
@@ -86,20 +87,20 @@
     }
     
     .objective-marker {
-        width: 2.5rem !important;
-        height: 2.5rem !important;
+        width: 2.75rem !important;
+        height: 2.75rem !important;
         font-size: 0.875rem !important;
     }
     
     .unit-card .card-body {
-        padding: 0.5rem !important;
+        padding: 0.75rem !important;
     }
     
-    /* Make buttons more touch-friendly */
+    /* Make buttons more touch-friendly (44px min for accessibility) */
     .btn-xs {
-        min-height: 2rem;
-        padding-left: 0.75rem;
-        padding-right: 0.75rem;
+        min-height: 2.75rem;
+        padding-left: 0.875rem;
+        padding-right: 0.875rem;
     }
     
     /* Stack unit controls vertically */
@@ -107,14 +108,30 @@
         flex-direction: column;
     }
     
-    /* Header adjustments */
+    /* Header adjustments - compact, wrap on small screens */
     .navbar {
-        padding: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        min-height: 3.5rem;
+    }
+    
+    .navbar .flex-1 {
+        min-width: 0;
+        overflow: hidden;
+    }
+    
+    .navbar .flex-1 .text-lg {
+        font-size: 1rem;
     }
     
     .navbar .flex-none {
         flex-wrap: wrap;
         gap: 0.25rem !important;
+    }
+    
+    /* Modals: full width on mobile, safe area */
+    .modal-box {
+        max-width: min(95vw, 42rem) !important;
+        margin: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
 }
 
@@ -144,43 +161,49 @@
 }
 .rule-tooltip.visible { opacity: 1; }
 
-/* Touch-friendly controls */
+/* Touch-friendly controls (pointer: coarse = touch devices) */
 @media (pointer: coarse) {
     .btn {
-        min-height: 2.5rem;
+        min-height: 2.75rem;
     }
     
     .btn-xs {
-        min-height: 2rem;
+        min-height: 2.75rem;
     }
     
     .btn-circle {
-        width: 2rem;
-        height: 2rem;
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+    
+    /* Larger tap targets for interactive elements */
+    .unit-card .btn,
+    .objective-marker {
+        min-height: 2.5rem;
     }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div id="game-board" class="min-h-screen bg-base-300">
+<div id="game-board" class="min-h-screen bg-base-300 pb-[env(safe-area-inset-bottom)]">
     <!-- Floating rule tooltip (positioned via JS to avoid clipping) -->
     <div ref="ruleTooltipEl" class="rule-tooltip"></div>
 
-    <!-- Toast notifications (replaces alert()) -->
-    <div class="toast toast-top toast-end z-[100] gap-2 p-4" v-if="toasts.length > 0">
+    <!-- Toast notifications (replaces alert()) - expand to fit full message -->
+    <div class="toast toast-top toast-end z-[100] gap-2 p-4 max-w-[min(95vw,42rem)]" v-if="toasts.length > 0">
         <div
             v-for="t in toasts"
             :key="t.id"
-            class="alert shadow-lg max-w-sm"
+            class="alert shadow-lg w-full max-w-none"
             :class="{
                 'alert-error': t.type === 'error',
                 'alert-success': t.type === 'success',
                 'alert-info': t.type === 'info'
             }"
         >
-            <span>[[ t.message ]]</span>
-            <button type="button" class="btn btn-ghost btn-xs" @click="dismissToast(t.id)" aria-label="Dismiss">×</button>
+            <span class="flex-1 min-w-0 whitespace-pre-wrap break-words">[[ t.message ]]</span>
+            <button type="button" class="btn btn-ghost btn-xs shrink-0" @click="dismissToast(t.id)" aria-label="Dismiss">×</button>
         </div>
     </div>
     
@@ -190,10 +213,10 @@
     </div>
     
     <!-- Error State -->
-    <div v-else-if="error" class="flex items-center justify-center min-h-screen">
-        <div class="alert alert-error max-w-md">
-            <span>[[ error ]]</span>
-            <a :href="`${getBasePath()}/`" class="btn btn-sm">Back to Lobby</a>
+    <div v-else-if="error" class="flex items-center justify-center min-h-screen p-4">
+        <div class="alert alert-error max-w-[min(95vw,42rem)] w-full">
+            <span class="flex-1 min-w-0 whitespace-pre-wrap break-words">[[ error ]]</span>
+            <a :href="`${getBasePath()}/`" class="btn btn-sm shrink-0">Back to Lobby</a>
         </div>
     </div>
     
@@ -516,7 +539,7 @@
                             placeholder="Paste share link..."
                             class="input input-sm input-bordered"
                         />
-                        <p class="text-xs text-base-content/60 mt-1">Official army lists only. Custom/community lists are not supported by Army Forge's export—use manual entry if needed.</p>
+                        <p class="text-xs text-base-content/60 mt-1">Official army lists only. Custom/community lists are not supported by Army Forge's export—use manual entry if needed. Lists can contain multiple army IDs (e.g. combined armies like The Ashen Pact); Herald shows all factions.</p>
                     </div>
                     <button 
                         class="btn btn-sm btn-block mb-2"
@@ -781,7 +804,7 @@
                     />
                 </div>
                 <div v-if="joinError" class="alert alert-error">
-                    [[ joinError ]]
+                    <span class="flex-1 min-w-0 whitespace-pre-wrap break-words">[[ joinError ]]</span>
                 </div>
                 <div class="flex gap-2">
                     <button class="btn btn-primary flex-1" @click="createNewPlayer">Join Game</button>
@@ -791,7 +814,7 @@
             
             <!-- No slots available -->
             <div v-else class="space-y-3">
-                <div v-if="joinError" class="alert alert-error">[[ joinError ]]</div>
+                <div v-if="joinError" class="alert alert-error"><span class="flex-1 min-w-0 whitespace-pre-wrap break-words">[[ joinError ]]</span></div>
                 <p class="text-sm text-base-content/70">This game already has two active players.</p>
                 <a :href="`${getBasePath()}/`" class="btn btn-outline btn-block">Return to Lobby</a>
             </div>
