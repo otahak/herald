@@ -2061,3 +2061,106 @@ async def test_transport_destroyed_auto_disembarks_passengers(client):
     assert passenger_data["state"]["transport_id"] is None
     assert passenger_data["state"]["is_shaken"] is True
 
+
+@pytest.mark.asyncio
+async def test_combined_unit_merged_not_attached(client):
+    """Combined (doubled) squads should be merged into one unit, not treated as hero attachments."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "CombinedTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    join = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    guest_id = join.json()["your_player_id"]
+
+    fake_units = [
+        {
+            "name": "Battle Brothers",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 100,
+            "rules": [],
+            "selectedUpgrades": [],
+            "loadout": [],
+            "id": "u1",
+            "selectionId": "sel_parent",
+            "armyId": "army1",
+        },
+        {
+            "name": "Battle Brothers",
+            "quality": 4,
+            "defense": 4,
+            "size": 5,
+            "cost": 100,
+            "rules": [],
+            "selectedUpgrades": [],
+            "loadout": [],
+            "id": "u2",
+            "selectionId": "sel_combined",
+            "joinToUnit": "sel_parent",
+            "combined": True,
+            "armyId": "army1",
+        },
+        {
+            "name": "Captain",
+            "quality": 3,
+            "defense": 4,
+            "size": 1,
+            "cost": 60,
+            "rules": [{"name": "Hero"}, {"name": "Tough", "rating": "3"}],
+            "selectedUpgrades": [],
+            "loadout": [],
+            "id": "u3",
+            "selectionId": "sel_hero",
+            "joinToUnit": "sel_parent",
+            "armyId": "army1",
+        },
+    ]
+
+    async def fake_get(url, *args, **kwargs):
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): ...
+            def json(self):
+                return {"units": fake_units, "gameSystem": "gf"}
+        return FakeResponse()
+
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)), \
+         patch("app.api.proxy.broadcast_to_game", new=AsyncMock()):
+        resp_import = await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={
+                "army_forge_url": "https://army-forge.onepagerules.com/share?id=FAKE_COMBINED",
+                "player_id": guest_id,
+            },
+        )
+    assert resp_import.status_code in (200, 201)
+    data = resp_import.json()
+    # 3 raw units, but combined unit merged → 2 actual units imported
+    assert data["units_imported"] == 2
+
+    game_resp = await client.get(f"/api/games/{code}")
+    assert game_resp.status_code == 200
+    units = game_resp.json()["units"]
+
+    # Only 2 units should exist: the merged parent and the hero
+    assert len(units) == 2
+
+    parent = next(u for u in units if u["name"] == "Battle Brothers")
+    hero = next(u for u in units if u["name"] == "Captain")
+
+    # Combined unit size should be 5 + 5 = 10
+    assert parent["size"] == 10
+    assert parent["state"]["models_remaining"] == 10
+
+    # Hero should be attached to the parent
+    assert hero["is_hero"] is True
+    assert hero["attached_to_unit_id"] == parent["id"]
+
+    # Parent should NOT have attached_to_unit_id
+    assert parent["attached_to_unit_id"] is None
+
