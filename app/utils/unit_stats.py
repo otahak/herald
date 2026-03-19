@@ -171,15 +171,17 @@ def parse_stat_modifications(
                 modifications["defense"] += defense_mod
                 logger.debug(f"Found additive Defense: {defense_mod} from rule: {rule.get('name', 'unknown')}")
         
-        # Parse Tough (absolute)
-        tough_value = parse_tough(text, rating)
+        rule_name = (rule.get("name", "") if isinstance(rule, dict) else "").lower()
+
+        tough_rating = rating if "tough" in rule_name else None
+        tough_value = parse_tough(text, tough_rating)
         if tough_value is not None:
             modifications["tough"] = tough_value
             modification_types["tough"] = "absolute"
             logger.debug(f"Found absolute Tough: {tough_value} from rule: {rule.get('name', 'unknown')}")
-        
-        # Parse Caster Level (absolute)
-        caster_value = parse_caster_level(text, rating)
+
+        caster_rating = rating if "caster" in rule_name else None
+        caster_value = parse_caster_level(text, caster_rating)
         if caster_value is not None:
             modifications["caster_level"] = caster_value
             modification_types["caster_level"] = "absolute"

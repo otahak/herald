@@ -125,6 +125,25 @@
     }
 }
 
+/* Floating rule tooltip - positioned via JS to stay within viewport */
+.rule-tooltip {
+    position: fixed;
+    z-index: 9999;
+    max-width: min(24rem, 90vw);
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    background: #1f2937;
+    color: #f3f4f6;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    border: 1px solid #374151;
+}
+.rule-tooltip.visible { opacity: 1; }
+
 /* Touch-friendly controls */
 @media (pointer: coarse) {
     .btn {
@@ -145,6 +164,9 @@
 
 {% block content %}
 <div id="game-board" class="min-h-screen bg-base-300">
+    <!-- Floating rule tooltip (positioned via JS to avoid clipping) -->
+    <div ref="ruleTooltipEl" class="rule-tooltip"></div>
+
     <!-- Toast notifications (replaces alert()) -->
     <div class="toast toast-top toast-end z-[100] gap-2 p-4" v-if="toasts.length > 0">
         <div
@@ -220,10 +242,13 @@
                             class="w-4 h-4 rounded-full"
                             :style="{ backgroundColor: leftPlayer.color }"
                         ></div>
-                        <h2 class="text-lg font-bold flex-1">[[ leftPlayer.name ]]</h2>
+                        <div class="flex-1">
+                            <h2 class="text-lg font-bold">[[ leftPlayer.name ]]</h2>
+                            <p v-if="leftPlayer.faction_name" class="text-xs opacity-60 -mt-0.5">[[ leftPlayer.faction_name ]]<span v-if="leftPlayer.army_book_version"> v[[ leftPlayer.army_book_version ]]</span></p>
+                        </div>
                         <span v-if="!leftPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
                         <span v-if="game.current_player_id === leftPlayer.id" class="badge badge-info badge-sm">Active</span>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.leftArmy ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.leftArmy ? '+' : '−' ]]</span>
                     </div>
                     
                     <div v-show="!sectionCollapsed.leftArmy">
@@ -242,6 +267,25 @@
                         </div>
                         <div v-if="isMoraleThreshold(leftPlayer.id)" class="text-warning text-xs mt-1">
                             Morale Threshold Reached
+                        </div>
+                    </div>
+                    
+                    <!-- Scout Deployment Reminder (round 1, dismissible) -->
+                    <div v-if="game.status === 'in_progress' && game.current_round === 1 && !scoutBannerDismissed && getScoutUnits(leftPlayer.id).length > 0" class="alert alert-info text-xs py-2 mb-2">
+                        <div class="flex-1">
+                            <strong>Scout Deployment:</strong>
+                            [[ getScoutUnits(leftPlayer.id).map(u => u.custom_name || u.name).join(', ') ]]
+                            — remember to forward deploy up to 12" from the deployment zone edge.
+                        </div>
+                        <button class="btn btn-xs btn-ghost" @click="scoutBannerDismissed = true">✕</button>
+                    </div>
+                    
+                    <!-- Ambush Deployment Reminder (round 2+) -->
+                    <div v-if="game.status === 'in_progress' && game.current_round >= 2 && getAmbushUnits(leftPlayer.id).length > 0" class="alert alert-warning text-xs py-2 mb-2">
+                        <div>
+                            <strong>Ambush:</strong>
+                            [[ getAmbushUnits(leftPlayer.id).map(u => u.custom_name || u.name).join(', ') ]]
+                            may deploy anywhere over 9" from enemies. Use the "Deploy from Ambush" button on each unit card.
                         </div>
                     </div>
                     
@@ -264,7 +308,7 @@
                         <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('leftSpells')">
                             <h3 class="font-bold text-sm">Spells</h3>
                             <span class="badge badge-xs">[[ getPlayerSpells(leftPlayer.id).length ]]</span>
-                            <span class="text-xs opacity-50">[[ sectionCollapsed.leftSpells ? '▶' : '▼' ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.leftSpells ? '+' : '−' ]]</span>
                         </div>
                         <div v-show="!sectionCollapsed.leftSpells" class="space-y-1">
                             <div v-for="spell in getPlayerSpells(leftPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
@@ -273,6 +317,21 @@
                                     <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
                                 </div>
                                 <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Faction Rules Reference -->
+                    <div v-if="getPlayerRules(leftPlayer.id).length > 0" class="mt-4">
+                        <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('leftRules')">
+                            <h3 class="font-bold text-sm">Faction Rules</h3>
+                            <span class="badge badge-xs">[[ getPlayerRules(leftPlayer.id).length ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.leftRules ? '+' : '−' ]]</span>
+                        </div>
+                        <div v-show="!sectionCollapsed.leftRules" class="space-y-1">
+                            <div v-for="rule in getPlayerRules(leftPlayer.id)" :key="rule.name" class="bg-base-200 rounded p-2 text-xs">
+                                <span class="font-semibold">[[ rule.name ]]</span>
+                                <p v-if="rule.description" class="text-base-content/70 mt-0.5">[[ rule.description ]]</p>
                             </div>
                         </div>
                     </div>
@@ -287,7 +346,7 @@
                 <div class="objectives-section border-b border-base-300">
                     <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('vp')">
                         <h3 class="font-bold">Victory Points</h3>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.vp ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.vp ? '+' : '−' ]]</span>
                     </div>
                     <div v-show="!sectionCollapsed.vp" class="p-4 pt-2">
                     <div class="flex justify-around gap-2">
@@ -346,7 +405,7 @@
                             <span class="badge badge-warning badge-sm">Solo</span>
                             <h3 class="font-bold text-sm">Solo Controls</h3>
                         </div>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.solo ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.solo ? '+' : '−' ]]</span>
                     </div>
                     <div v-show="!sectionCollapsed.solo" class="p-4 pt-2 space-y-3">
                         <!-- Player Switcher -->
@@ -391,7 +450,7 @@
                 <div class="border-b border-base-300">
                     <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('round')">
                         <h3 class="font-bold">Round [[ game.current_round ]] / [[ game.max_rounds ]]</h3>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.round ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.round ? '+' : '−' ]]</span>
                     </div>
                     <div v-show="!sectionCollapsed.round" class="p-4 pt-2">
                         <div class="flex items-center justify-center gap-2 mb-2">
@@ -422,7 +481,7 @@
                 <div class="border-b border-base-300" v-if="!observerMode && game.status === 'lobby'">
                     <div class="p-4 pb-0 cursor-pointer select-none flex items-center justify-between" @click="toggleSection('lobby')">
                         <h3 class="font-bold">Game Setup</h3>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.lobby ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.lobby ? '+' : '−' ]]</span>
                     </div>
                     <div v-show="!sectionCollapsed.lobby" class="p-4 pt-2">
                     
@@ -512,7 +571,7 @@
                         <div class="flex items-center gap-2">
                             <h3 class="font-bold text-sm">Game Log</h3>
                             <span class="badge badge-xs">[[ events.length ]]</span>
-                            <span class="text-xs opacity-50">[[ sectionCollapsed.log ? '▶' : '▼' ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.log ? '+' : '−' ]]</span>
                         </div>
                         <div v-if="!observerMode" class="flex gap-2" @click.stop>
                             <button 
@@ -560,10 +619,13 @@
                             class="w-4 h-4 rounded-full"
                             :style="{ backgroundColor: rightPlayer.color }"
                         ></div>
-                        <h2 class="text-lg font-bold flex-1">[[ rightPlayer.name ]]</h2>
+                        <div class="flex-1">
+                            <h2 class="text-lg font-bold">[[ rightPlayer.name ]]</h2>
+                            <p v-if="rightPlayer.faction_name" class="text-xs opacity-60 -mt-0.5">[[ rightPlayer.faction_name ]]<span v-if="rightPlayer.army_book_version"> v[[ rightPlayer.army_book_version ]]</span></p>
+                        </div>
                         <span v-if="!rightPlayer.is_connected" class="badge badge-warning badge-sm">Offline</span>
                         <span v-if="game.current_player_id === rightPlayer.id" class="badge badge-info badge-sm">Active</span>
-                        <span class="text-xs opacity-50">[[ sectionCollapsed.rightArmy ? '▶' : '▼' ]]</span>
+                        <span class="text-xs opacity-50">[[ sectionCollapsed.rightArmy ? '+' : '−' ]]</span>
                     </div>
                     
                     <div v-show="!sectionCollapsed.rightArmy">
@@ -582,6 +644,25 @@
                         </div>
                         <div v-if="isMoraleThreshold(rightPlayer.id)" class="text-warning text-xs mt-1">
                             Morale Threshold Reached
+                        </div>
+                    </div>
+                    
+                    <!-- Scout Deployment Reminder (round 1, dismissible) -->
+                    <div v-if="game.status === 'in_progress' && game.current_round === 1 && !scoutBannerDismissed && getScoutUnits(rightPlayer.id).length > 0" class="alert alert-info text-xs py-2 mb-2">
+                        <div class="flex-1">
+                            <strong>Scout Deployment:</strong>
+                            [[ getScoutUnits(rightPlayer.id).map(u => u.custom_name || u.name).join(', ') ]]
+                            — remember to forward deploy up to 12" from the deployment zone edge.
+                        </div>
+                        <button class="btn btn-xs btn-ghost" @click="scoutBannerDismissed = true">✕</button>
+                    </div>
+                    
+                    <!-- Ambush Deployment Reminder (round 2+) -->
+                    <div v-if="game.status === 'in_progress' && game.current_round >= 2 && getAmbushUnits(rightPlayer.id).length > 0" class="alert alert-warning text-xs py-2 mb-2">
+                        <div>
+                            <strong>Ambush:</strong>
+                            [[ getAmbushUnits(rightPlayer.id).map(u => u.custom_name || u.name).join(', ') ]]
+                            may deploy anywhere over 9" from enemies. Use the "Deploy from Ambush" button on each unit card.
                         </div>
                     </div>
                     
@@ -604,7 +685,7 @@
                         <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('rightSpells')">
                             <h3 class="font-bold text-sm">Spells</h3>
                             <span class="badge badge-xs">[[ getPlayerSpells(rightPlayer.id).length ]]</span>
-                            <span class="text-xs opacity-50">[[ sectionCollapsed.rightSpells ? '▶' : '▼' ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.rightSpells ? '+' : '−' ]]</span>
                         </div>
                         <div v-show="!sectionCollapsed.rightSpells" class="space-y-1">
                             <div v-for="spell in getPlayerSpells(rightPlayer.id)" :key="spell.name" class="bg-base-200 rounded p-2 text-xs">
@@ -613,6 +694,21 @@
                                     <span class="badge badge-xs">[[ spell.cost || 1 ]] token[[ (spell.cost || 1) !== 1 ? 's' : '' ]]</span>
                                 </div>
                                 <p v-if="spell.description" class="text-base-content/70 mt-0.5">[[ spell.description ]]</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Faction Rules Reference -->
+                    <div v-if="getPlayerRules(rightPlayer.id).length > 0" class="mt-4">
+                        <div class="cursor-pointer select-none flex items-center gap-2 mb-2" @click="toggleSection('rightRules')">
+                            <h3 class="font-bold text-sm">Faction Rules</h3>
+                            <span class="badge badge-xs">[[ getPlayerRules(rightPlayer.id).length ]]</span>
+                            <span class="text-xs opacity-50">[[ sectionCollapsed.rightRules ? '+' : '−' ]]</span>
+                        </div>
+                        <div v-show="!sectionCollapsed.rightRules" class="space-y-1">
+                            <div v-for="rule in getPlayerRules(rightPlayer.id)" :key="rule.name" class="bg-base-200 rounded p-2 text-xs">
+                                <span class="font-semibold">[[ rule.name ]]</span>
+                                <p v-if="rule.description" class="text-base-content/70 mt-0.5">[[ rule.description ]]</p>
                             </div>
                         </div>
                     </div>
@@ -1208,12 +1304,14 @@
             <div class="mb-4">
                 <p class="text-sm font-semibold mb-2">1. Choose action</p>
                 <p v-if="getUnitForAction()?.state?.is_shaken" class="text-warning text-xs mb-2">Shaken: must idle (Hold) to recover.</p>
+                <p v-if="unitIsHoldOnly(getUnitForAction())" class="text-info text-xs mb-2">Artillery/Immobile: may only Hold.</p>
+                <p v-if="unitIsAircraft(getUnitForAction()) && !getUnitForAction()?.state?.is_shaken" class="text-info text-xs mb-2">Aircraft: may only Advance (straight line, +30").</p>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                     <button
                         class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'hold' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('hold')"
-                        :disabled="isExpired"
+                        :disabled="isExpired || (unitIsAircraft(getUnitForAction()) && !getUnitForAction()?.state?.is_shaken)"
                     >
                         <span class="font-bold">Hold</span>
                         <span class="text-[10px] font-normal opacity-70">No move. Can shoot.</span>
@@ -1222,7 +1320,7 @@
                         class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'advance' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('advance')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken || unitIsHoldOnly(getUnitForAction())"
                     >
                         <span class="font-bold">Advance</span>
                         <span class="text-[10px] font-normal opacity-70">Move 6". Can shoot.</span>
@@ -1231,7 +1329,7 @@
                         class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'rush' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('rush')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken || unitIsHoldOnly(getUnitForAction()) || unitIsAircraft(getUnitForAction())"
                     >
                         <span class="font-bold">Rush</span>
                         <span class="text-[10px] font-normal opacity-70">Move 12". No attacks.</span>
@@ -1240,7 +1338,7 @@
                         class="btn btn-sm flex flex-col h-auto py-2 leading-tight"
                         :class="selectedAction === 'charge' ? 'btn-primary' : 'btn-outline'"
                         @click="selectAction('charge')"
-                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken"
+                        :disabled="isExpired || getUnitForAction()?.state?.is_shaken || unitIsHoldOnly(getUnitForAction()) || unitIsAircraft(getUnitForAction())"
                     >
                         <span class="font-bold">Charge</span>
                         <span class="text-[10px] font-normal opacity-70">Move 12" into melee.</span>
@@ -1343,7 +1441,10 @@
             <h3 class="font-bold text-lg mb-2">
                 Cast Spell — [[ getUnitForCast()?.display_name || getUnitForCast()?.name || 'Unit' ]]
             </h3>
-            <p class="text-sm text-base-content/70 mb-3">Tokens: [[ getUnitForCast()?.state?.spell_tokens ?? 0 ]] / 6. Roll 4+ (plus modifier). Pick a spell:</p>
+            <p class="text-sm text-base-content/70 mb-3">
+                Tokens: [[ getUnitForCast()?.state?.spell_tokens ?? 0 ]] / 6.
+                Select a spell, then roll 4+ and record the result.
+            </p>
             <div class="flex-1 overflow-y-auto mb-4">
                 <div class="space-y-2">
                     <div
@@ -1363,13 +1464,6 @@
                     </div>
                 </div>
             </div>
-            <div class="form-control mb-2">
-                <label class="label py-0"><span class="label-text">Roll modifier (e.g. +1 / -1 from allies)</span></label>
-                <select v-model.number="castRollModifier" class="select select-bordered select-sm w-full">
-                    <option :value="null">None</option>
-                    <option v-for="n in 7" :key="n" :value="n - 3">[[ (n - 3) >= 0 ? '+' : '' ]][[ n - 3 ]]</option>
-                </select>
-            </div>
             <div v-if="getUnitForCast()" class="form-control mb-3">
                 <label class="label py-0"><span class="label-text">Target unit (optional)</span></label>
                 <select v-model="castTargetUnitId" class="select select-bordered select-sm w-full">
@@ -1377,10 +1471,23 @@
                     <option v-for="u in getOpposingUnits(getUnitForCast().player_id)" :key="u.id" :value="u.id">[[ u.display_name || u.name ]]</option>
                 </select>
             </div>
-            <div class="modal-action mt-2">
+            <div class="modal-action mt-2 flex-wrap gap-2">
                 <button type="button" class="btn btn-ghost" @click="closeCastModal">Cancel</button>
-                <button type="button" class="btn btn-primary" @click="attemptCastSubmit" :disabled="!selectedUnitForCast || !selectedCastSpell || (getUnitForCast()?.state?.spell_tokens ?? 0) < (selectedCastSpell?.cost ?? 1)">
-                    Attempt cast
+                <button
+                    type="button"
+                    class="btn btn-error"
+                    @click="attemptCastSubmit(false)"
+                    :disabled="!selectedCastSpell || (getUnitForCast()?.state?.spell_tokens ?? 0) < (selectedCastSpell?.cost ?? 1)"
+                >
+                    Failed
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-success"
+                    @click="attemptCastSubmit(true)"
+                    :disabled="!selectedCastSpell || (getUnitForCast()?.state?.spell_tokens ?? 0) < (selectedCastSpell?.cost ?? 1)"
+                >
+                    Succeeded
                 </button>
             </div>
         </div>
@@ -1467,6 +1574,7 @@
                 <span><strong>Q</strong>[[ unit.quality ]]+</span>
                 <span><strong>D</strong>[[ unit.defense ]]+</span>
                 <span v-if="unit.tough > 1"><strong>T</strong>[[ unit.tough ]]</span>
+                <span v-if="unit.size > 2" class="opacity-60" :title="'Morale fails below ' + moraleThreshold + ' models'"><strong>Morale</strong> &lt;[[ moraleThreshold ]]</span>
             </div>
             
             <!-- Status Badges -->
@@ -1632,8 +1740,11 @@
                                 v-for="(r, i) in rulesDisplay"
                                 :key="i"
                                 class="badge badge-ghost badge-sm"
-                                :class="{ 'tooltip tooltip-bottom cursor-help': getRuleDescription(r) }"
-                                :data-tip="getRuleDescription(r) || undefined"
+                                :class="{ 'cursor-help': getRuleDescription(r) }"
+                                @mouseenter="getRuleDescription(r) && $root.showRuleTooltip($event, getRuleDescription(r))"
+                                @mouseleave="$root.hideRuleTooltip()"
+                                @touchstart.passive="getRuleDescription(r) && $root.showRuleTooltip($event, getRuleDescription(r))"
+                                @touchend="$root.hideRuleTooltip()"
                             >[[ r ]]</span>
                         </div>
                     </div>
@@ -1649,7 +1760,11 @@
                             <li v-for="(u, i) in upgradesDisplay" :key="i" class="text-base-content/90">[[ u ]]</li>
                         </ul>
                     </div>
-                    <div v-if="showDetails && rulesDisplay.length === 0 && fullLoadoutDisplay.length === 0 && upgradesDisplay.length === 0" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
+                    <div v-if="unit.state?.custom_notes" class="mt-1 p-2 bg-base-200 rounded">
+                        <div class="font-semibold text-base-content/70">Notes</div>
+                        <p class="text-base-content/80 whitespace-pre-wrap">[[ unit.state.custom_notes ]]</p>
+                    </div>
+                    <div v-if="showDetails && rulesDisplay.length === 0 && fullLoadoutDisplay.length === 0 && upgradesDisplay.length === 0 && !unit.state?.custom_notes" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
                 </div>
             </div>
         </div>
@@ -1711,8 +1826,11 @@
                                         v-for="(r, i) in getRulesForUnit(hero)"
                                         :key="i"
                                         class="badge badge-ghost badge-sm"
-                                        :class="{ 'tooltip tooltip-bottom cursor-help': getRuleDescription(r) }"
-                                        :data-tip="getRuleDescription(r) || undefined"
+                                        :class="{ 'cursor-help': getRuleDescription(r) }"
+                                        @mouseenter="getRuleDescription(r) && $root.showRuleTooltip($event, getRuleDescription(r))"
+                                        @mouseleave="$root.hideRuleTooltip()"
+                                        @touchstart.passive="getRuleDescription(r) && $root.showRuleTooltip($event, getRuleDescription(r))"
+                                        @touchend="$root.hideRuleTooltip()"
                                     >[[ r ]]</span>
                                 </div>
                             </div>
@@ -1728,7 +1846,11 @@
                                     <li v-for="(u, i) in getUpgradesForUnit(hero)" :key="i" class="text-base-content/90">[[ u ]]</li>
                                 </ul>
                             </div>
-                            <div v-if="heroDetailsExpanded(hero.id) && getRulesForUnit(hero).length === 0 && getLoadoutForUnit(hero).length === 0 && getUpgradesForUnit(hero).length === 0" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
+                            <div v-if="hero.state?.custom_notes" class="mt-1 p-2 bg-base-300 rounded">
+                                <div class="font-semibold text-base-content/70">Notes</div>
+                                <p class="text-base-content/80 whitespace-pre-wrap">[[ hero.state.custom_notes ]]</p>
+                            </div>
+                            <div v-if="heroDetailsExpanded(hero.id) && getRulesForUnit(hero).length === 0 && getLoadoutForUnit(hero).length === 0 && getUpgradesForUnit(hero).length === 0 && !hero.state?.custom_notes" class="text-base-content/50 italic">No rules, loadout, or upgrades.</div>
                         </div>
                     </div>
                 </div>
@@ -1786,6 +1908,7 @@ document.addEventListener("DOMContentLoaded", () => {
             };
             
             const maxWounds = computed(() => props.unit.size * props.unit.tough);
+            const moraleThreshold = computed(() => Math.ceil(props.unit.size / 2));
             
             // Find attached heroes for this unit
             const attachedHeroes = computed(() => {
@@ -1915,14 +2038,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (desc) return desc.length > 60 ? desc.slice(0, 57) + '…' : desc;
                 return '';
             };
-            const GDF_RULES = {
+            const GDF_CORE_RULES = {
                 'Aircraft': 'May only use Advance actions, moving in a straight line, and adding 30" to its total move. Ignores all units and terrain when moving.',
                 'Ambush': 'May be set aside before deployment. At the start of any round after the first, deploy anywhere over 9" from enemies.',
                 'AP': 'Targets get -X to Defense rolls when blocking hits from this weapon.',
                 'Artillery': 'May only use Hold actions. +1 to hit over 9". Enemies shooting from over 9" get -2 to hit.',
                 'Bane': 'Ignores Regeneration; target must re-roll unmodified Defense 6s.',
                 'Blast': 'Ignores cover; each hit is multiplied by X (up to models in target unit).',
-                'Caster': 'Gets X spell tokens each round (max 6). Before attacking, spend tokens to cast spells. Roll 4+ to succeed. Allies within 18" LOS can spend tokens for +1/-1.',
+                'Caster': 'Gets X spell tokens each round (max 6). Before attacking, spend tokens to cast spells.',
                 'Counter': 'Strikes first when charged. Charging unit gets -1 total Impact rolls per model with Counter.',
                 'Deadly': 'Assign each wound to one model and multiply by X. Resolved first; wounds don\'t carry over.',
                 'Fast': '+2" on Advance, +4" on Rush/Charge.',
@@ -1950,10 +2073,24 @@ document.addEventListener("DOMContentLoaded", () => {
                 'Transport': 'May carry up to X models. Units enter/exit via move actions within 6". On destruction: dangerous terrain test, Shaken, placed within 6".',
                 'Unstoppable': 'Ignores Regeneration and all negative modifiers.',
             };
+            const buildRulesDict = () => {
+                const merged = { ...GDF_CORE_RULES };
+                for (const p of (GameStore.state.players || [])) {
+                    for (const r of (p.special_rules || [])) {
+                        if (r.name && r.description) merged[r.name] = r.description;
+                    }
+                }
+                return merged;
+            };
+            const allRules = reactive(buildRulesDict());
+            watch(() => GameStore.state.players, () => {
+                for (const key of Object.keys(allRules)) delete allRules[key];
+                Object.assign(allRules, buildRulesDict());
+            }, { deep: true });
             const getRuleDescription = (ruleText) => {
                 if (!ruleText || typeof ruleText !== 'string') return null;
                 const baseName = ruleText.replace(/\s*\(.*\)\s*$/, '').trim();
-                return GDF_RULES[baseName] || null;
+                return allRules[baseName] || null;
             };
             const isFlavorCasterName = (name) => {
                 if (!name || typeof name !== 'string') return false;
@@ -2083,8 +2220,19 @@ document.addEventListener("DOMContentLoaded", () => {
             };
             
             const destroyUnit = () => {
-                if (confirm(`Destroy ${props.unit.name}?`)) {
-                    emit('update', props.unit.id, { deployment_status: 'destroyed' });
+                const u = props.unit;
+                const uName = u.custom_name || u.name;
+                let msg = `Destroy ${uName}?`;
+                if (u.is_transport && embarkedUnits.value.length > 0) {
+                    const names = embarkedUnits.value.map(eu => eu.custom_name || eu.name).join(', ');
+                    msg = `Destroy transport ${uName}?\n\n` +
+                        `Embarked units (${names}) will emergency disembark:\n` +
+                        `• Each takes a dangerous terrain test (roll per model, 1 = wound)\n` +
+                        `• All become Shaken\n` +
+                        `• Place within 6" of wreck`;
+                }
+                if (confirm(msg)) {
+                    emit('update', u.id, { deployment_status: 'destroyed' });
                 }
             };
             
@@ -2153,6 +2301,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 heroDetailsExpanded,
                 toggleHeroDetails,
                 maxWounds,
+                moraleThreshold,
                 attachedHeroes,
                 attachedToUnitName,
                 canDeploy,
@@ -2207,12 +2356,37 @@ document.addEventListener("DOMContentLoaded", () => {
                 players.value.find(p => p.id && p.id !== currentPlayerId.value) || null
             );
             
-            const defaultCollapsed = { vp: false, solo: false, saveload: false, round: false, turn: false, lobby: false, log: false, leftArmy: false, rightArmy: false, leftSpells: false, rightSpells: false };
+            const defaultCollapsed = { vp: false, solo: false, round: false, lobby: false, log: false, leftArmy: false, rightArmy: false, leftSpells: false, rightSpells: false, leftRules: true, rightRules: true };
             const savedCollapsed = (() => { try { return JSON.parse(localStorage.getItem('herald_collapsed') || '{}'); } catch { return {}; } })();
             const sectionCollapsed = reactive({ ...defaultCollapsed, ...savedCollapsed });
             const toggleSection = (key) => {
                 sectionCollapsed[key] = !sectionCollapsed[key];
                 try { localStorage.setItem('herald_collapsed', JSON.stringify(sectionCollapsed)); } catch {}
+            };
+            
+            const ruleTooltipEl = ref(null);
+            const showRuleTooltip = (event, text) => {
+                const el = ruleTooltipEl.value;
+                if (!el || !text) return;
+                el.textContent = text;
+                el.classList.add('visible');
+                const rect = event.target.getBoundingClientRect();
+                const pad = 8;
+                el.style.left = '0px';
+                el.style.top = '0px';
+                const tw = el.offsetWidth;
+                const th = el.offsetHeight;
+                let left = rect.left + rect.width / 2 - tw / 2;
+                let top = rect.bottom + 6;
+                if (top + th > window.innerHeight - pad) top = rect.top - th - 6;
+                left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
+                top = Math.max(pad, top);
+                el.style.left = left + 'px';
+                el.style.top = top + 'px';
+            };
+            const hideRuleTooltip = () => {
+                const el = ruleTooltipEl.value;
+                if (el) el.classList.remove('visible');
             };
             
             const armyForgeUrl = ref('');
@@ -2236,12 +2410,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const showActionModal = ref(false);
             const selectedUnitForAction = ref(null);
             const selectedAction = ref(null);
+            const scoutBannerDismissed = ref(false);
             const selectedTargets = ref([]);
             const showCastModal = ref(false);
             const selectedUnitForCast = ref(null);
-            const castSpellValue = ref(1);
-            const castSpellName = ref('');
-            const castRollModifier = ref(null);
             const castTargetUnitId = ref(null);
             const selectedCastSpell = ref(null);
             const DEFAULT_SPELLS = [
@@ -2327,10 +2499,18 @@ document.addEventListener("DOMContentLoaded", () => {
             
             // Methods
             const getPlayerUnits = (playerId) => {
-                // Return only units that are not attached to another unit
-                // (attached heroes will be shown nested with their parent)
                 return units.value.filter(u => 
                     u.player_id === playerId && !u.attached_to_unit_id
+                );
+            };
+            const getAmbushUnits = (playerId) => {
+                return units.value.filter(u =>
+                    u.player_id === playerId && u.state?.deployment_status === 'in_ambush'
+                );
+            };
+            const getScoutUnits = (playerId) => {
+                return units.value.filter(u =>
+                    u.player_id === playerId && u.has_scout && u.state?.deployment_status !== 'destroyed'
                 );
             };
             
@@ -2380,6 +2560,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 return units.value.find(u => String(u.id) === String(selectedUnitForAction.value));
             };
             
+            const unitHasRule = (unit, ruleName) => {
+                if (!unit?.rules || !Array.isArray(unit.rules)) return false;
+                const target = ruleName.toLowerCase();
+                return unit.rules.some(r => {
+                    const name = typeof r === 'string' ? r : (r?.name || r?.label || '');
+                    return name.toLowerCase().replace(/\s*\(.*\)$/, '').trim() === target;
+                });
+            };
+            const unitIsHoldOnly = (unit) => unitHasRule(unit, 'artillery') || unitHasRule(unit, 'immobile');
+            const unitIsAircraft = (unit) => unitHasRule(unit, 'aircraft');
             const canCastInActivation = () => {
                 const u = getUnitForAction();
                 return u?.is_caster && !u?.state?.is_shaken && (u?.state?.spell_tokens ?? 0) >= 1;
@@ -2405,6 +2595,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (list && Array.isArray(list) && list.length > 0) return list;
                 return DEFAULT_SPELLS;
             };
+            const getPlayerRules = (playerId) => {
+                const player = players.value.find(p => String(p.id) === String(playerId));
+                const rules = player?.special_rules;
+                if (rules && Array.isArray(rules) && rules.length > 0) return rules;
+                return [];
+            };
             const getPlayerSpells = (playerId) => {
                 const player = players.value.find(p => String(p.id) === String(playerId));
                 const list = player?.spells;
@@ -2421,9 +2617,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const openCastModal = (unitId) => {
                 selectedUnitForCast.value = unitId;
                 selectedCastSpell.value = null;
-                castSpellValue.value = 1;
-                castSpellName.value = '';
-                castRollModifier.value = null;
                 castTargetUnitId.value = null;
                 showCastModal.value = true;
             };
@@ -2435,34 +2628,44 @@ document.addEventListener("DOMContentLoaded", () => {
                 showCastModal.value = false;
                 selectedUnitForCast.value = null;
             };
-            const attemptCastSubmit = async () => {
+            const attemptCastSubmit = async (success) => {
                 if (!selectedUnitForCast.value || !game.value?.code) return;
                 const u = getUnitForCast();
-                const cost = selectedCastSpell.value ? selectedCastSpell.value.cost : castSpellValue.value;
-                const name = selectedCastSpell.value ? selectedCastSpell.value.name : (castSpellName.value || undefined);
-                if (!u || (u.state?.spell_tokens ?? 0) < cost) {
-                    showToast('Not enough spell tokens');
+                const spell = selectedCastSpell.value;
+                if (!spell) {
+                    showToast('Select a spell');
                     return;
                 }
-                if (selectedCastSpell.value && !name) {
-                    showToast('Select a spell');
+                const cost = spell.cost ?? 1;
+                if (!u || (u.state?.spell_tokens ?? 0) < cost) {
+                    showToast('Not enough spell tokens');
                     return;
                 }
                 try {
                     await store.actions.attemptCast(game.value.code, selectedUnitForCast.value, {
                         spell_value: cost,
-                        spell_name: name,
+                        spell_name: spell.name,
                         target_unit_id: castTargetUnitId.value || undefined,
-                        roll_modifier: castRollModifier.value != null ? castRollModifier.value : undefined,
+                        success: success,
                     });
-                    showToast('Spell cast: see event log', 'success');
+                    showToast(
+                        `${spell.name}: ${success ? 'succeeded' : 'failed'}`,
+                        success ? 'success' : 'info'
+                    );
                     closeCastModal();
                 } catch (err) {
-                    showToast(err.message || 'Cast failed');
+                    showToast(err.message || 'Failed to record cast', 'error');
                 }
             };
             
             const selectAction = (action) => {
+                const unit = getUnitForAction();
+                if (unit) {
+                    const shaken = unit.state?.is_shaken;
+                    if (unitIsHoldOnly(unit) && action !== 'hold') return;
+                    if (unitIsAircraft(unit) && !shaken && action !== 'advance') return;
+                    if (shaken && action !== 'hold') return;
+                }
                 selectedAction.value = action;
                 if (action !== 'charge' && action !== 'attack') {
                     selectedTargets.value = [];
@@ -3326,6 +3529,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 isClearingUnits,
                 sectionCollapsed,
                 toggleSection,
+                ruleTooltipEl,
+                showRuleTooltip,
+                hideRuleTooltip,
                 confirmClearUnits,
                 showSaveModal,
                 showLoadModal,
@@ -3351,13 +3557,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedTargets,
                 showCastModal,
                 selectedUnitForCast,
-                castSpellValue,
-                castSpellName,
-                castRollModifier,
                 castTargetUnitId,
                 selectedCastSpell,
                 getSpellsForCaster,
                 getPlayerSpells,
+                getPlayerRules,
                 selectCastSpell,
                 showClearLogModal,
                 isClearingLog,
@@ -3372,6 +3576,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Methods
                 selectPlayer,
                 getPlayerUnits,
+                getAmbushUnits,
+                getScoutUnits,
+                scoutBannerDismissed,
                 getAttachedHeroes,
                 getArmyHealth,
                 submitManualUnit,
@@ -3395,6 +3602,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 getUnitForAction,
                 getAttachedHeroesForUnit,
                 canCastInActivation,
+                unitHasRule,
+                unitIsHoldOnly,
+                unitIsAircraft,
                 closeActionModal,
                 openActionModal,
                 openCastModal,

@@ -47,8 +47,15 @@ class Player(Base):
     # Turn tracking
     has_finished_activations: Mapped[bool] = mapped_column(Boolean, default=False)
     
-    # Spells available to this army (from import or default). List of {name, cost, description}.
+    # Spells available to this army (from import). List of {name, cost, description}.
     spells: Mapped[Optional[List[Any]]] = mapped_column(JSON, nullable=True)
+
+    # Faction special rules from army book. List of {name, description, hasRating, ...}.
+    special_rules: Mapped[Optional[List[Any]]] = mapped_column(JSON, nullable=True)
+
+    # Army book metadata
+    faction_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    army_book_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     
     # Relationships
     game: Mapped["Game"] = relationship(

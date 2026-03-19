@@ -241,8 +241,8 @@ async def run_migration(script_path: Path):
         print(f"✅ Migration {script_path.name} completed successfully")
         return True
 
-async def main():
-    """Run all migrations."""
+async def main(reset_db: bool = False):
+    """Run all migrations. Pass reset_db=True to drop and recreate the database first."""
     print("="*60)
     print("Herald Database Migration Runner")
     print("="*60)
@@ -257,7 +257,6 @@ async def main():
     for mig in migrations:
         print(f"  - {mig.name}")
     
-    print("\nResetting database (drop/recreate) ...")
     env_vars = load_env_file()
     env = {**os.environ, **env_vars, "PYTHONPATH": str(PROJECT_ROOT)}
     database_url = env.get("DATABASE_URL")
@@ -265,24 +264,26 @@ async def main():
         print("ERROR: DATABASE_URL not found. Cannot reset database.")
         return 1
 
-    await reset_database(database_url)
+    if reset_db:
+        print("\nResetting database (drop/recreate) ...")
+        await reset_database(database_url)
 
-    print("\nInitializing base schema...")
-    init_script = DEPLOY_DIR / "init_db.py"
-    init_cmd, init_env = _build_script_command(init_script, env)
-    init_result = subprocess.run(
-        init_cmd,
-        cwd=str(PROJECT_ROOT),
-        env=init_env,
-        capture_output=True,
-        text=True,
-    )
-    if init_result.returncode != 0:
-        print("❌ init_db.py failed:")
-        print(init_result.stdout)
-        print(init_result.stderr, file=sys.stderr)
-        return 1
-    print("✓ Base schema initialized")
+        print("\nInitializing base schema...")
+        init_script = DEPLOY_DIR / "init_db.py"
+        init_cmd, init_env = _build_script_command(init_script, env)
+        init_result = subprocess.run(
+            init_cmd,
+            cwd=str(PROJECT_ROOT),
+            env=init_env,
+            capture_output=True,
+            text=True,
+        )
+        if init_result.returncode != 0:
+            print("❌ init_db.py failed:")
+            print(init_result.stdout)
+            print(init_result.stderr, file=sys.stderr)
+            return 1
+        print("✓ Base schema initialized")
 
     print("\nStarting migrations...")
     
@@ -303,5 +304,12 @@ async def main():
         return 0
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
+    import argparse
+    parser = argparse.ArgumentParser(description="Herald Database Migration Runner")
+    parser.add_argument(
+        "--reset", action="store_true",
+        help="DROP and recreate the database before running migrations (DESTRUCTIVE)",
+    )
+    args = parser.parse_args()
+    exit_code = asyncio.run(main(reset_db=args.reset))
     sys.exit(exit_code)

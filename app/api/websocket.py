@@ -159,10 +159,15 @@ async def get_game_state(session: AsyncSession, code: str) -> Optional[dict]:
             "is_host": player.is_host,
             "is_connected": player.is_connected,
             "army_name": player.army_name,
+            "army_forge_list_id": player.army_forge_list_id,
             "starting_unit_count": player.starting_unit_count,
             "starting_points": player.starting_points,
             "has_finished_activations": player.has_finished_activations,
             "spells": player.spells,
+            "special_rules": player.special_rules,
+            "faction_name": player.faction_name,
+            "army_book_version": player.army_book_version,
+            "victory_points": player.victory_points,
         })
         
         for unit in player.units:

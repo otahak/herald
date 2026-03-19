@@ -634,7 +634,7 @@ const GameStore = {
                     spell_value: options.spell_value,
                     spell_name: options.spell_name || null,
                     target_unit_id: options.target_unit_id || null,
-                    roll_modifier: options.roll_modifier != null ? options.roll_modifier : null,
+                    success: options.success,
                 };
                 const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/cast`, {
                     method: 'POST',
@@ -643,7 +643,7 @@ const GameStore = {
                 });
                 if (!response.ok) {
                     const error = await response.json();
-                    throw new Error(error.detail || 'Failed to cast spell');
+                    throw new Error(error.detail || 'Failed to record cast');
                 }
                 const result = await response.json();
                 await this.fetchGame(code);
