@@ -135,6 +135,51 @@ def extract_list_id(url_or_id: str) -> str:
     )
 
 
+def _weapon_to_loadout_item(w: dict) -> dict:
+    """Convert army book weapon/item to TTS-style loadout entry."""
+    sr = w.get("specialRules") or []
+    rules = []
+    for r in sr:
+        if isinstance(r, dict):
+            rules.append({"name": r.get("name", r.get("label", "")), "rating": r.get("rating")})
+    return {
+        "name": w.get("name", ""),
+        "label": w.get("label"),
+        "range": w.get("range"),
+        "attacks": w.get("attacks"),
+        "specialRules": rules if rules else None,
+    }
+
+
+def _share_unit_to_tts(share_unit: dict, book_unit: dict) -> dict:
+    """Convert share API unit + army book unit to TTS-style unit dict."""
+    loadout = []
+    for w in book_unit.get("weapons") or []:
+        loadout.append(_weapon_to_loadout_item(w))
+    for item in book_unit.get("items") or []:
+        loadout.append(_weapon_to_loadout_item(item))
+    rules = []
+    for r in book_unit.get("rules") or []:
+        if isinstance(r, dict):
+            rules.append({"name": r.get("name", r.get("label", "")), "rating": r.get("rating")})
+    return {
+        "id": share_unit.get("id"),
+        "selectionId": share_unit.get("selectionId", share_unit.get("id")),
+        "armyId": share_unit.get("armyId"),
+        "name": book_unit.get("name", "Unknown Unit"),
+        "customName": share_unit.get("customName"),
+        "quality": book_unit.get("quality", 4),
+        "defense": book_unit.get("defense", 4),
+        "size": book_unit.get("size", 1),
+        "cost": book_unit.get("cost", 0),
+        "loadout": loadout,
+        "rules": rules,
+        "selectedUpgrades": share_unit.get("selectedUpgrades") or [],
+        "joinToUnit": share_unit.get("joinToUnit"),
+        "combined": share_unit.get("combined", False),
+    }
+
+
 def parse_special_rules(rules: List[dict]) -> dict:
     """Parse special rules to extract key unit properties."""
     result = {
@@ -434,24 +479,59 @@ class ProxyController(Controller):
                 if e.response.status_code == 404:
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
-                    # Try to get more details from the response
-                    error_detail = "Unknown error"
+                    # TTS API failed (combined armies, custom books, etc). Try share API fallback.
+                    logger.info(f"TTS API returned 500, trying share API fallback for {list_id}")
                     try:
-                        error_body = e.response.json()
-                        error_detail = error_body.get("error", error_body.get("message", str(error_body)))
-                    except Exception:
-                        error_text = e.response.text[:200] if e.response.text else "No error details"
-                        error_detail = error_text
-                    
-                    logger.error(f"Army Forge 500 error details: {error_detail}")
-                    raise ValidationException(
-                        "Army Forge's export API returned an error for this list. "
-                        "This often affects combined-army lists (e.g. The Ashen Pact), custom/community army books, "
-                        "or lists Army Forge's TTS export doesn't support—a limitation on Army Forge's side. "
-                        "Workaround: add units manually, or try a single-army list from an official book. "
-                        "If you believe this is an official list that should work, please report it to One Page Rules."
-                    )
-                raise ValidationException(f"Army Forge API error: {e.response.status_code}")
+                        share_resp = await client.get(
+                            f"https://army-forge.onepagerules.com/api/share/{list_id}",
+                            timeout=15.0,
+                        )
+                        share_resp.raise_for_status()
+                        share_data = share_resp.json()
+                    except Exception as share_err:
+                        logger.warning(f"Share API fallback failed: {share_err}")
+                        raise ValidationException(
+                            "Army Forge's export API returned an error for this list. "
+                            "This often affects combined-army lists (e.g. The Ashen Pact), custom/community army books, "
+                            "or lists Army Forge's TTS export doesn't support. Add units manually or try a single-army list."
+                        )
+                    # Convert share data to TTS-like format via army books
+                    game_system = share_data.get("gameSystem", "gf")
+                    share_units = share_data.get("units", [])
+                    army_books: dict[str, dict] = {}
+                    for su in share_units:
+                        aid = su.get("armyId")
+                        if aid and aid not in army_books:
+                            try:
+                                book_resp = await client.get(
+                                    f"https://army-forge.onepagerules.com/api/army-books/{aid}?gameSystem={game_system}",
+                                    timeout=10.0,
+                                )
+                                book_resp.raise_for_status()
+                                army_books[aid] = book_resp.json()
+                            except Exception as book_err:
+                                logger.warning(f"Could not fetch army book {aid}: {book_err}")
+                                army_books[aid] = {}
+                    book_units_by_id: dict[str, dict] = {}
+                    for aid, book in army_books.items():
+                        for u in book.get("units", []):
+                            book_units_by_id[(aid, u.get("id"))] = u
+                    tts_units = []
+                    for su in share_units:
+                        aid = su.get("armyId")
+                        uid = su.get("id")
+                        book_unit = book_units_by_id.get((aid, uid)) if aid and uid else None
+                        if book_unit:
+                            tts_units.append(_share_unit_to_tts(su, book_unit))
+                        else:
+                            logger.warning(f"Could not resolve unit {uid} from army {aid}, skipping")
+                    army_data = {
+                        "gameSystem": game_system,
+                        "units": tts_units,
+                    }
+                    logger.info(f"Share API fallback: converted {len(tts_units)} units for {list_id}")
+                else:
+                    raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException:
                 logger.error(f"Timeout fetching Army Forge list {list_id}")
                 raise ValidationException("Army Forge request timed out. Please try again.")

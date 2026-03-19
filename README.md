@@ -158,7 +158,7 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - **Clear All Units**: Use the "Clear All Units" button (only visible when player has units) to remove all units. Requires confirmation modal. Only available in lobby status. Resets player stats (unit count, points, army name).
 
 ### Known limitations (out of our control)
-- **Combined-army lists (e.g. The Ashen Pact)**: Army Forge's TTS export API often returns 500 for lists that combine multiple armies. This is an Army Forge limitation; use manual entry or single-army lists.
+- **Share API fallback**: When the TTS export returns 500 (combined armies, custom books), Herald falls back to the share API + army books. Most lists import successfully; if not, add units manually.
 - **Custom / community army lists**: Army Forge’s export API (what Herald uses) often returns an error for lists built from **custom or community army books**. That behavior is on Army Forge’s side; Herald cannot work around it until One Page Rules supports exporting those lists. Use lists from **official** army books, or add units manually.
 
 ## Unit Details (Board)
