@@ -1049,14 +1049,17 @@ class GamesController(Controller):
         
         return _unit_response_with_effective_caster(unit)
     
-    @delete("/{code:str}/units/{unit_id:uuid}")
+    @delete("/{code:str}/units/{unit_id:uuid}", status_code=status_codes.HTTP_200_OK)
     async def delete_unit(
         self,
         code: str,
         unit_id: uuid.UUID,
         session: AsyncSession,
     ) -> dict:
-        """Delete a single unit (lobby only)."""
+        """Delete a single unit (lobby only).
+        
+        Attached heroes on a deleted parent are detached (SET NULL), not cascade-deleted.
+        """
         game = await get_game_by_code(session, code, load_attached_heroes=True)
         if game.status != GameStatus.LOBBY:
             raise ValidationException("Units can only be deleted during lobby")
@@ -1073,7 +1076,16 @@ class GamesController(Controller):
         if not unit:
             raise NotFoundException(f"Unit {unit_id} not found in game")
         
+        # Cache values before delete to avoid greenlet issues after commit
         unit_cost = unit.cost or 0
+        display_name = unit.display_name
+        unit_name = unit.name
+        cached_unit_id = unit.id
+        game_id = game.id
+        game_round = game.current_round
+        player_id = unit_player.id if unit_player else None
+        player_name = unit_player.name if unit_player else "Unknown"
+        
         if unit.state:
             await session.delete(unit.state)
         await session.delete(unit)
@@ -1082,11 +1094,25 @@ class GamesController(Controller):
             unit_player.starting_unit_count = max(0, (unit_player.starting_unit_count or 0) - 1)
             unit_player.starting_points = max(0, (unit_player.starting_points or 0) - unit_cost)
         
+        event = GameEvent.create(
+            game_id=game_id,
+            event_type=EventType.CUSTOM,
+            description=f"{player_name} removed unit: {display_name} ({unit_cost}pts)",
+            player_id=player_id,
+            round_number=game_round,
+            target_unit_id=cached_unit_id,
+            details={
+                "unit_name": unit_name,
+                "cost": unit_cost,
+            },
+        )
+        session.add(event)
+        
         await session.commit()
         
         await broadcast_if_not_solo(game, code, {
             "type": "state_update",
-            "data": {"reason": "unit_deleted", "unit_id": str(unit_id)},
+            "data": {"reason": "unit_deleted", "unit_id": str(cached_unit_id)},
         })
         return {"success": True, "message": f"Unit deleted"}
     
@@ -1098,7 +1124,7 @@ class GamesController(Controller):
         data: UpdateUnitProfileRequest,
         session: AsyncSession,
     ) -> UnitResponse:
-        """Update a unit's profile fields (lobby only)."""
+        """Update a unit's profile fields like custom_name (lobby only)."""
         game = await get_game_by_code(session, code, load_attached_heroes=True)
         if game.status != GameStatus.LOBBY:
             raise ValidationException("Unit profile can only be edited during lobby")
@@ -1114,9 +1140,11 @@ class GamesController(Controller):
             raise NotFoundException(f"Unit {unit_id} not found in game")
         
         if data.custom_name is not None:
-            unit.custom_name = data.custom_name.strip() if data.custom_name.strip() else None
+            stripped = data.custom_name.strip()
+            unit.custom_name = stripped if stripped else None
         
         await session.commit()
+        await session.refresh(unit)
         
         await broadcast_if_not_solo(game, code, {
             "type": "state_update",

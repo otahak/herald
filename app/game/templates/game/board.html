@@ -458,10 +458,9 @@
                     </div>
                     <button 
                         class="btn btn-sm btn-block mb-2"
-                        :disabled="!armyForgeUrl || isImporting"
+                        :disabled="!armyForgeUrl || isImporting || isExpired"
                         :class="{ 'loading': isImporting }"
                         @click="importArmy"
-                        :disabled="isExpired"
                     >
                         Import Army
                     </button>
@@ -1736,6 +1735,7 @@
                 </div>
             </template>
         </div>
+    </div>
     </div>
 </template>
 
