@@ -158,8 +158,8 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - **Clear All Units**: Use the "Clear All Units" button (only visible when player has units) to remove all units. Requires confirmation modal. Only available in lobby status. Resets player stats (unit count, points, army name).
 
 ### Known limitations (out of our control)
-- **Share API fallback**: When the TTS export returns 500 (combined armies, custom books), Herald falls back to the share API + army books. Most lists import successfully; if not, add units manually.
-- **Custom / community army lists**: Army Forge’s export API (what Herald uses) often returns an error for lists built from **custom or community army books**. That behavior is on Army Forge’s side; Herald cannot work around it until One Page Rules supports exporting those lists. Use lists from **official** army books, or add units manually.
+- **Share API fallback**: When the TTS export returns 500 (combined armies, some custom books), Herald falls back to the share API + army books. Many lists import successfully; if not, add units manually.
+- **Third-party / custom army books**: Not all third-party or community army books are supported. Herald can only import lists whose army books are publicly accessible via Army Forge's API. If an army book is private, unlisted, or otherwise unavailable, import will fail—use manual entry for those units. Official OPR army books and many community books work.
 
 ## Unit Details (Board)
 - **Expandable details**: Each unit card (and each attached hero) has a "Show/Hide details" section with **Rules** (badges), **Weapons/Equipment** (list), and **Upgrades** (human-readable; no raw JSON). Same formatting for imported and manually added units.
