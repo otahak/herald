@@ -5,10 +5,8 @@ Automatic migration runner.
 Discovers and runs all migration scripts in the deploy/ directory.
 Migrations are run in alphabetical order and are idempotent (safe to run multiple times).
 
-By default, the database persists between runs. Use --reset-db to drop and recreate
-the database before running migrations (useful for troubleshooting).
+WARNING: This runner resets the database on every run.
 """
-import argparse
 import asyncio
 import os
 import sys
@@ -244,7 +242,7 @@ async def run_migration(script_path: Path):
         return True
 
 async def main(reset_db: bool = False):
-    """Run all migrations."""
+    """Run all migrations. Pass reset_db=True to drop and recreate the database first."""
     print("="*60)
     print("Herald Database Migration Runner")
     print("="*60)
@@ -262,12 +260,11 @@ async def main(reset_db: bool = False):
     env_vars = load_env_file()
     env = {**os.environ, **env_vars, "PYTHONPATH": str(PROJECT_ROOT)}
     database_url = env.get("DATABASE_URL")
-    
+    if not database_url:
+        print("ERROR: DATABASE_URL not found. Cannot reset database.")
+        return 1
+
     if reset_db:
-        if not database_url:
-            print("ERROR: DATABASE_URL not found. Cannot reset database.")
-            return 1
-        
         print("\nResetting database (drop/recreate) ...")
         await reset_database(database_url)
 
@@ -287,9 +284,6 @@ async def main(reset_db: bool = False):
             print(init_result.stderr, file=sys.stderr)
             return 1
         print("✓ Base schema initialized")
-    else:
-        print("\nSkipping database reset (database will persist)")
-        print("Use --reset-db to drop and recreate the database")
 
     print("\nStarting migrations...")
     
@@ -310,24 +304,12 @@ async def main(reset_db: bool = False):
         return 0
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Run database migrations for Herald",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run migrations normally (database persists):
-  python deploy/run_migrations.py
-  
-  # Drop and recreate database, then run migrations:
-  python deploy/run_migrations.py --reset-db
-        """
-    )
+    import argparse
+    parser = argparse.ArgumentParser(description="Herald Database Migration Runner")
     parser.add_argument(
-        "--reset-db",
-        action="store_true",
-        help="Drop and recreate the database before running migrations (destructive!)"
+        "--reset", action="store_true",
+        help="DROP and recreate the database before running migrations (DESTRUCTIVE)",
     )
     args = parser.parse_args()
-    
-    exit_code = asyncio.run(main(reset_db=args.reset_db))
+    exit_code = asyncio.run(main(reset_db=args.reset))
     sys.exit(exit_code)

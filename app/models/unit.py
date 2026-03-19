@@ -204,10 +204,16 @@ class UnitState(Base):
         return max(0, self.wounds_remaining / self.unit.max_wounds)
     
     def reset_for_new_round(self) -> None:
-        """Reset per-round state (called at round start)."""
+        """Reset per-round state (called at round start). Caster(X) units gain X spell tokens (max 6)."""
         self.activated_this_round = False
         self.is_fatigued = False
         # Shaken persists until cleared by spending activation
+        # Caster(X): gain X spell tokens at start of each round, cap at 6 (incl. caster from rules/loadout/upgrades)
+        if self.unit:
+            from app.utils.unit_stats import get_effective_caster
+            effective_caster, effective_level = get_effective_caster(self.unit)
+            if effective_caster and effective_level:
+                self.spell_tokens = min(6, self.spell_tokens + effective_level)
     
     def __repr__(self) -> str:
         unit_name = self.unit.display_name if self.unit else "Unknown"

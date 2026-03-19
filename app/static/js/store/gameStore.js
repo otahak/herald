@@ -537,6 +537,47 @@ const GameStore = {
             }
         },
         
+        async deleteUnit(code, unitId) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}`, {
+                    method: 'DELETE',
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to delete unit');
+                }
+                GameStore.state.units = GameStore.state.units.filter(u => u.id !== unitId);
+                await this.fetchGame(code);
+                return true;
+            } catch (error) {
+                Debug.error('Delete unit failed:', error.message);
+                throw error;
+            }
+        },
+        
+        async renameUnit(code, unitId, customName) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/profile`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ custom_name: customName }),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to rename unit');
+                }
+                const updated = await response.json();
+                const index = GameStore.state.units.findIndex(u => u.id === unitId);
+                if (index !== -1) GameStore.state.units[index] = updated;
+                return updated;
+            } catch (error) {
+                Debug.error('Rename unit failed:', error.message);
+                throw error;
+            }
+        },
+        
         /**
          * Log a unit action (rush, advance, hold, charge, attack)
          */
@@ -576,6 +617,41 @@ const GameStore = {
             } catch (error) {
                 // Don't set global error state for action logging failures - these should be handled locally
                 Debug.error('Unit action logging failed (non-critical):', error.message);
+                throw error;
+            }
+        },
+        
+        /**
+         * Attempt to cast a spell (during activation, before attacks). Caster(X): spend tokens >= spell value, roll 4+.
+         * @param {string} code - Game code
+         * @param {string} unitId - Caster unit ID
+         * @param {object} options - { spell_value, spell_name?, target_unit_id?, roll_modifier? }
+         */
+        async attemptCast(code, unitId, options = {}) {
+            try {
+                const basePath = GameStore.getBasePath();
+                const body = {
+                    spell_value: options.spell_value,
+                    spell_name: options.spell_name || null,
+                    target_unit_id: options.target_unit_id || null,
+                    success: options.success,
+                };
+                const response = await fetch(`${basePath}/api/games/${code}/units/${unitId}/cast`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to record cast');
+                }
+                const result = await response.json();
+                await this.fetchGame(code);
+                await this.fetchEvents();
+                this.broadcastStateUpdate({ type: 'spell_cast', unit_id: unitId, success: result.success });
+                return result;
+            } catch (error) {
+                Debug.error('Spell cast failed (non-critical):', error.message);
                 throw error;
             }
         },

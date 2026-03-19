@@ -2,6 +2,7 @@
 
 import json
 import logging
+
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,8 @@ from app.models import (
     GameSave,
 )
 from app.api.websocket import broadcast_to_game
-from app.utils.logging import error_log
+from app.utils.logging import error_log, log_exception_with_context
+from app.utils.unit_stats import get_effective_caster
 from app.api.proxy import parse_special_rules
 from app.api.game_schemas import (
     CreateGameRequest,
@@ -37,6 +39,8 @@ from app.api.game_schemas import (
     UpdateGameStateRequest,
     UpdateUnitStateRequest,
     LogUnitActionRequest,
+    CastSpellRequest,
+    UpdateUnitProfileRequest,
     UpdateObjectiveRequest,
     CreateObjectivesRequest,
     UpdateVictoryPointsRequest,
@@ -70,6 +74,16 @@ logger = logging.getLogger("Herald.games")
 
 # Re-export for backwards compatibility (e.g. websocket may import get_game_by_code from here)
 __all__ = ["GamesController", "get_game_by_code", "broadcast_if_not_solo", "log_event", "check_and_update_expiration"]
+
+
+def _unit_response_with_effective_caster(unit: Unit) -> UnitResponse:
+    """Build UnitResponse with is_caster/caster_level from DB or from rules/loadout/upgrades."""
+    resp = UnitResponse.model_validate(unit)
+    effective_caster, effective_level = get_effective_caster(unit)
+    resp.is_caster = effective_caster
+    if effective_caster:
+        resp.caster_level = effective_level or resp.caster_level or 1
+    return resp
 
 
 # --- Controller ---
@@ -173,7 +187,7 @@ class GamesController(Controller):
             units.extend(player.units)
         
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response
     
     @post("/{code:str}/join")
@@ -245,7 +259,7 @@ class GamesController(Controller):
             units.extend(p.units)
         
         response = JoinGameResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         response.your_player_id = str(player_id)  # Tell client which player they are
         return response
     
@@ -317,7 +331,7 @@ class GamesController(Controller):
             units.extend(p.units)
         
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response
     
     @patch("/{code:str}/state")
@@ -577,12 +591,9 @@ class GamesController(Controller):
                 )
                 
                 # Automatically detach any attached heroes when parent is destroyed
-                # Heroes may survive as independent units
-                # If parent was shaken, preserve that status on the detached hero
                 parent_was_shaken = unit.state.is_shaken
                 if unit.attached_heroes:
                     for attached_hero in unit.attached_heroes:
-                        # Preserve shaken status if parent was shaken
                         if parent_was_shaken and attached_hero.state:
                             if not attached_hero.state.is_shaken:
                                 attached_hero.state.is_shaken = True
@@ -602,26 +613,49 @@ class GamesController(Controller):
                             player_id=attached_hero.player_id,
                             target_unit_id=attached_hero.id,
                         )
+                
+                # Auto-disembark all units inside a destroyed transport.
+                # Per GDF rules: passengers take a dangerous terrain test,
+                # become Shaken, and are placed within 6" of the wreck.
+                if unit.is_transport:
+                    all_units = [u for p in game.players for u in p.units]
+                    for passenger in all_units:
+                        if passenger.state and passenger.state.transport_id == unit.id:
+                            passenger.state.transport_id = None
+                            passenger.state.deployment_status = DeploymentStatus.DEPLOYED
+                            passenger.state.is_shaken = True
+                            await log_event(
+                                session, game,
+                                EventType.UNIT_DISEMBARKED,
+                                (
+                                    f"{passenger.display_name} emergency disembarked from "
+                                    f"{unit.display_name} (destroyed) — Shaken, "
+                                    f"dangerous terrain test required"
+                                ),
+                                player_id=passenger.player_id,
+                                target_unit_id=passenger.id,
+                                details={"reason": "transport_destroyed", "dangerous_terrain_test": True},
+                            )
         
-        if data.transport_id is not None:
-            old_transport = unit.state.transport_id
-            unit.state.transport_id = data.transport_id
-            unit.state.deployment_status = DeploymentStatus.EMBARKED
-            await log_event(
-                session, game,
-                EventType.UNIT_EMBARKED,
-                f"{unit.display_name} embarked on transport",
-                target_unit_id=unit.id,
-            )
-        elif data.transport_id is None and unit.state.transport_id is not None:
-            unit.state.transport_id = None
-            unit.state.deployment_status = DeploymentStatus.DEPLOYED
-            await log_event(
-                session, game,
-                EventType.UNIT_DISEMBARKED,
-                f"{unit.display_name} disembarked from transport",
-                target_unit_id=unit.id,
-            )
+        if "transport_id" in data.model_fields_set:
+            if data.transport_id is not None:
+                unit.state.transport_id = data.transport_id
+                unit.state.deployment_status = DeploymentStatus.EMBARKED
+                await log_event(
+                    session, game,
+                    EventType.UNIT_EMBARKED,
+                    f"{unit.display_name} embarked on transport",
+                    target_unit_id=unit.id,
+                )
+            elif unit.state.transport_id is not None:
+                unit.state.transport_id = None
+                unit.state.deployment_status = DeploymentStatus.DEPLOYED
+                await log_event(
+                    session, game,
+                    EventType.UNIT_DISEMBARKED,
+                    f"{unit.display_name} disembarked from transport",
+                    target_unit_id=unit.id,
+                )
         
         if data.spell_tokens is not None and data.spell_tokens != unit.state.spell_tokens:
             old_tokens = unit.state.spell_tokens
@@ -678,7 +712,7 @@ class GamesController(Controller):
             }
         })
         
-        return UnitResponse.model_validate(unit)
+        return _unit_response_with_effective_caster(unit)
     
     @post("/{code:str}/units/manual")
     async def create_unit_manually(
@@ -933,11 +967,15 @@ class GamesController(Controller):
         for unit in units:
             await session.delete(unit)
         
-        # Reset player stats
+        # Reset player stats and army book data
         player.starting_unit_count = 0
         player.starting_points = 0
         player.army_name = None
         player.army_forge_list_id = None
+        player.spells = None
+        player.special_rules = None
+        player.faction_name = None
+        player.army_book_version = None
         
         # Log the clear action
         event = GameEvent.create(
@@ -1033,7 +1071,114 @@ class GamesController(Controller):
             }
         })
         
-        return UnitResponse.model_validate(unit)
+        return _unit_response_with_effective_caster(unit)
+    
+    @delete("/{code:str}/units/{unit_id:uuid}", status_code=status_codes.HTTP_200_OK)
+    async def delete_unit(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> dict:
+        """Delete a single unit (lobby only).
+        
+        Attached heroes on a deleted parent are detached (SET NULL), not cascade-deleted.
+        """
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Units can only be deleted during lobby")
+        
+        unit = None
+        unit_player = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    unit_player = player
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        
+        # Cache values before delete to avoid greenlet issues after commit
+        unit_cost = unit.cost or 0
+        display_name = unit.display_name
+        unit_name = unit.name
+        cached_unit_id = unit.id
+        game_id = game.id
+        game_round = game.current_round
+        player_id = unit_player.id if unit_player else None
+        player_name = unit_player.name if unit_player else "Unknown"
+        is_solo = game.is_solo
+        
+        if unit.state:
+            await session.delete(unit.state)
+        await session.delete(unit)
+        
+        if unit_player:
+            unit_player.starting_unit_count = max(0, (unit_player.starting_unit_count or 0) - 1)
+            unit_player.starting_points = max(0, (unit_player.starting_points or 0) - unit_cost)
+        
+        event = GameEvent.create(
+            game_id=game_id,
+            event_type=EventType.CUSTOM,
+            description=f"{player_name} removed unit: {display_name} ({unit_cost}pts)",
+            player_id=player_id,
+            round_number=game_round,
+            target_unit_id=cached_unit_id,
+            details={
+                "unit_name": unit_name,
+                "cost": unit_cost,
+            },
+        )
+        session.add(event)
+        
+        await session.commit()
+        
+        if not is_solo:
+            await broadcast_to_game(code, {
+                "type": "state_update",
+                "data": {"reason": "unit_deleted", "unit_id": str(cached_unit_id)},
+            })
+        return {"success": True, "message": f"Unit deleted"}
+    
+    @patch("/{code:str}/units/{unit_id:uuid}/profile")
+    async def update_unit_profile(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        data: UpdateUnitProfileRequest,
+        session: AsyncSession,
+    ) -> UnitResponse:
+        """Update a unit's profile fields like custom_name (lobby only)."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        if game.status != GameStatus.LOBBY:
+            raise ValidationException("Unit profile can only be edited during lobby")
+        
+        unit = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        
+        if data.custom_name is not None:
+            stripped = data.custom_name.strip()
+            unit.custom_name = stripped if stripped else None
+        
+        await session.commit()
+        await session.refresh(unit)
+        
+        game = await get_game_by_code(session, code)
+        
+        await broadcast_if_not_solo(game, code, {
+            "type": "state_update",
+            "data": {"reason": "unit_updated", "unit_id": str(unit_id)},
+        })
+        return _unit_response_with_effective_caster(unit)
     
     @post("/{code:str}/units/{unit_id:uuid}/actions")
     async def log_unit_action(
@@ -1069,6 +1214,10 @@ class GamesController(Controller):
             
             if not unit.state:
                 raise ValidationException("Unit has no state (not initialized)")
+            
+            # Shaken units can only Hold (idle to recover); cannot use other actions or cast
+            if unit.state.is_shaken and data.action.lower() != "hold":
+                raise ValidationException("Shaken units can only Hold (idle to recover).")
             
             # Validate action type
             valid_actions = ["rush", "advance", "hold", "charge", "attack"]
@@ -1194,15 +1343,93 @@ class GamesController(Controller):
         except Exception as e:
             logger.error(f"Error logging unit action for unit {unit_id} in game {code}: {e}", exc_info=True)
             log_exception_with_context(
-                "log_unit_action",
-                {
+                e,
+                context={
                     "game_code": code,
                     "unit_id": str(unit_id),
                     "action": data.action,
                     "target_unit_ids": [str(tid) for tid in (data.target_unit_ids or [])],
-                }
+                },
+                message="log_unit_action",
             )
             raise
+    
+    @post("/{code:str}/units/{unit_id:uuid}/cast")
+    async def attempt_cast(
+        self,
+        code: str,
+        unit_id: uuid.UUID,
+        data: CastSpellRequest,
+        session: AsyncSession,
+    ) -> dict:
+        """Record a spell cast result. Player rolls dice themselves; we just track the outcome."""
+        game = await get_game_by_code(session, code, load_attached_heroes=True)
+        game.last_activity_at = datetime.now(timezone.utc)
+        
+        unit = None
+        unit_player_id = None
+        for player in game.players:
+            for u in player.units:
+                if u.id == unit_id:
+                    unit = u
+                    unit_player_id = player.id
+                    break
+        
+        if not unit:
+            raise NotFoundException(f"Unit {unit_id} not found in game")
+        if not unit.state:
+            raise ValidationException("Unit has no state")
+        effective_caster, _ = get_effective_caster(unit)
+        if not effective_caster:
+            raise ValidationException("Unit is not a caster")
+        if unit.state.is_shaken:
+            raise ValidationException("Shaken units cannot cast spells")
+        if unit.state.spell_tokens < data.spell_value:
+            raise ValidationException(
+                f"Not enough spell tokens: need {data.spell_value}, have {unit.state.spell_tokens}"
+            )
+        
+        unit.state.spell_tokens -= data.spell_value
+        
+        spell_label = data.spell_name or f"Spell ({data.spell_value})"
+        target_desc = ""
+        if data.target_unit_id:
+            for p in game.players:
+                for u in p.units:
+                    if u.id == data.target_unit_id:
+                        target_desc = f" on {u.display_name}"
+                        break
+        
+        result_desc = "succeeded" if data.success else "failed"
+        description = f"{unit.display_name} cast {spell_label}{target_desc} — {result_desc}"
+        
+        await log_event(
+            session,
+            game,
+            EventType.SPELL_CAST,
+            description,
+            player_id=unit_player_id,
+            target_unit_id=data.target_unit_id,
+            details={
+                "spell_value": data.spell_value,
+                "spell_name": data.spell_name,
+                "success": data.success,
+                "tokens_remaining": unit.state.spell_tokens,
+            },
+        )
+        await session.commit()
+        
+        game = await get_game_by_code(session, code)
+        
+        await broadcast_if_not_solo(game, code, {
+            "type": "state_update",
+            "data": {
+                "reason": "spell_cast",
+                "unit_id": str(unit_id),
+                "success": data.success,
+            },
+        })
+        return {"success": data.success, "message": description}
     
     @patch("/{code:str}/objectives/{objective_id:uuid}")
     async def update_objective(
@@ -1526,9 +1753,15 @@ class GamesController(Controller):
             "is_host": player.is_host,
             "is_connected": player.is_connected,
             "army_name": player.army_name,
+            "army_forge_list_id": player.army_forge_list_id,
             "starting_unit_count": player.starting_unit_count,
             "starting_points": player.starting_points,
             "victory_points": player.victory_points,
+            "has_finished_activations": player.has_finished_activations,
+            "spells": player.spells,
+            "special_rules": player.special_rules,
+            "faction_name": player.faction_name,
+            "army_book_version": player.army_book_version,
         }
         is_solo = game.is_solo
         await session.commit()
@@ -1561,6 +1794,12 @@ class GamesController(Controller):
         
         # Log event or delete log entry
         if data.delta > 0:
+            # New round: reset activations and grant caster spell tokens
+            for player in game.players:
+                player.has_finished_activations = False
+                for unit in player.units:
+                    if unit.state:
+                        unit.state.reset_for_new_round()
             # Round increased: Create log entry
             await log_event(
                 session, game,
@@ -1615,7 +1854,7 @@ class GamesController(Controller):
         units = []
         for p in game.players:
             units.extend(p.units)
-        game_response.units = [UnitResponse.model_validate(u) for u in units]
+        game_response.units = [_unit_response_with_effective_caster(u) for u in units]
         
         # Serialize to JSON
         game_state_json = json.dumps(game_response.model_dump(), default=str)
@@ -1722,6 +1961,12 @@ class GamesController(Controller):
                 p.starting_unit_count = int(sp.get("starting_unit_count", 0))
                 p.starting_points = int(sp.get("starting_points", 0))
                 p.army_name = sp.get("army_name") or None
+                p.army_forge_list_id = sp.get("army_forge_list_id") or None
+                p.has_finished_activations = bool(sp.get("has_finished_activations", False))
+                p.spells = sp.get("spells") or None
+                p.special_rules = sp.get("special_rules") or None
+                p.faction_name = sp.get("faction_name") or None
+                p.army_book_version = sp.get("army_book_version") or None
         
         # 3. Delete existing units (and their states via cascade)
         await session.execute(sql_delete(Unit).where(Unit.player_id.in_([p.id for p in game.players])))
@@ -1817,5 +2062,5 @@ class GamesController(Controller):
         for p in game.players:
             units.extend(p.units)
         response = GameWithUnitsResponse.model_validate(game)
-        response.units = [UnitResponse.model_validate(u) for u in units]
+        response.units = [_unit_response_with_effective_caster(u) for u in units]
         return response

@@ -171,15 +171,17 @@ def parse_stat_modifications(
                 modifications["defense"] += defense_mod
                 logger.debug(f"Found additive Defense: {defense_mod} from rule: {rule.get('name', 'unknown')}")
         
-        # Parse Tough (absolute)
-        tough_value = parse_tough(text, rating)
+        rule_name = (rule.get("name", "") if isinstance(rule, dict) else "").lower()
+
+        tough_rating = rating if "tough" in rule_name else None
+        tough_value = parse_tough(text, tough_rating)
         if tough_value is not None:
             modifications["tough"] = tough_value
             modification_types["tough"] = "absolute"
             logger.debug(f"Found absolute Tough: {tough_value} from rule: {rule.get('name', 'unknown')}")
-        
-        # Parse Caster Level (absolute)
-        caster_value = parse_caster_level(text, rating)
+
+        caster_rating = rating if "caster" in rule_name else None
+        caster_value = parse_caster_level(text, caster_rating)
         if caster_value is not None:
             modifications["caster_level"] = caster_value
             modification_types["caster_level"] = "absolute"
@@ -306,3 +308,23 @@ def calculate_effective_stats(
         "effective_size": max(1, effective_size),  # Clamp to minimum 1
         "effective_caster_level": max(0, min(6, effective_caster_level)),  # Clamp to valid range
     }
+
+
+def get_effective_caster(unit: Any) -> tuple:
+    """
+    Return (is_caster, caster_level) for a unit, including when caster comes from rules, loadout, or upgrades.
+    Use for cast endpoint, round token grant, and API response so equipment/upgrade casters work.
+    """
+    rules = getattr(unit, "rules", None) or []
+    loadout = getattr(unit, "loadout", None) or []
+    upgrades = getattr(unit, "upgrades", None) or []
+    mods = parse_stat_modifications(rules=rules, upgrades=upgrades, loadout=loadout)
+    from_db = getattr(unit, "is_caster", False)
+    level_from_db = getattr(unit, "caster_level", 0) or 0
+    from_rules_loadout_upgrades = mods.get("caster_level") is not None
+    level_from_mods = mods.get("caster_level") or 0
+    is_caster = from_db or from_rules_loadout_upgrades
+    caster_level = max(level_from_db, level_from_mods) if is_caster else 0
+    if is_caster and caster_level < 1:
+        caster_level = 1
+    return (is_caster, caster_level)

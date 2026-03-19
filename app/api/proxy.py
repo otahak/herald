@@ -170,6 +170,118 @@ def parse_special_rules(rules: List[dict]) -> dict:
     return result
 
 
+def _caster_level_from_loadout_item(item: dict) -> int:
+    """Extract caster level from a loadout item's rating field, name, or label."""
+    if item.get("rating") is not None:
+        try:
+            return int(item["rating"])
+        except (ValueError, TypeError):
+            pass
+    for field in ("name", "label"):
+        text = (item.get(field) or "").strip()
+        m = re.search(r"caster\s*\(\s*(\d+)\s*\)", text, re.I)
+        if m:
+            return int(m.group(1))
+    return 1
+
+
+def _is_flavor_caster_name(name: str) -> bool:
+    """True if name is a flavor title with (Caster(N)), e.g. 'Technomancer (Caster(2))'."""
+    if not name or not name.strip():
+        return False
+    n = name.strip().lower()
+    return "caster" in n and bool(re.search(r"caster\s*\(\s*\d+\s*\)", n))
+
+
+def parse_loadout_for_caster(loadout: list) -> tuple:
+    """
+    Treat Caster as a skill like Hero, Tough(X), etc.
+    Returns (is_caster, caster_level, loadout_cleaned, rules_to_add).
+    - Purely "Caster" / "Caster(N)" items: remove from loadout.
+    - Flavor items like "Technomancer (Caster(2))": remove from loadout and add to rules_to_add
+      so they display in the Rules section as "Technomancer (Caster(2))".
+    - specialRules Caster on other items: strip from that item, set is_caster.
+    """
+    if not loadout or not isinstance(loadout, list):
+        return False, 0, loadout or [], []
+    is_caster_ref = [False]
+    caster_level_ref = [0]
+    rules_to_add: list = []
+
+    def walk(items: list) -> list:
+        out = []
+        for item in (i for i in items if isinstance(i, dict)):
+            name = (item.get("name") or item.get("label") or "").strip()
+            name_lower = name.lower()
+            # Purely caster-only item: remove from loadout
+            if name_lower == "caster" or re.match(r"^caster\s*\(\s*\d+\s*\)\s*$", name_lower):
+                is_caster_ref[0] = True
+                caster_level_ref[0] = max(caster_level_ref[0], _caster_level_from_loadout_item(item))
+                continue
+            # Flavor title with (Caster(N)): move to Rules, remove from loadout
+            if _is_flavor_caster_name(name):
+                is_caster_ref[0] = True
+                caster_level_ref[0] = max(caster_level_ref[0], _caster_level_from_loadout_item(item))
+                rules_to_add.append({"name": name, "rating": None})  # display as "Technomancer (Caster(2))"
+                continue
+            # Strip Caster from specialRules so equipment doesn't show [Caster(2)]
+            special_rules = item.get("specialRules")
+            if special_rules:
+                cleaned = []
+                for r in special_rules:
+                    if isinstance(r, dict) and (r.get("name") or r.get("label") or "").strip().lower() == "caster":
+                        is_caster_ref[0] = True
+                        caster_level_ref[0] = max(caster_level_ref[0], int(r.get("rating")) if r.get("rating") is not None else 1)
+                    else:
+                        cleaned.append(r)
+                if len(cleaned) != len(special_rules):
+                    item = {**item, "specialRules": cleaned}
+            content = item.get("content")
+            if content and isinstance(content, list):
+                item = {**item, "content": walk(content)}
+            out.append(item)
+        return out
+
+    filtered = walk(loadout)
+    return is_caster_ref[0], caster_level_ref[0], filtered, rules_to_add
+
+
+def parse_upgrades_for_caster(upgrades: list) -> tuple:
+    """
+    Check selectedUpgrades for Caster (e.g. upgrade name "Caster(2)" or upgrade granting Caster rule).
+    Returns (is_caster, caster_level).
+    """
+    if not upgrades or not isinstance(upgrades, list):
+        return False, 0
+    is_caster = False
+    caster_level = 0
+
+    def check_item(item: dict) -> None:
+        nonlocal is_caster, caster_level
+        if not isinstance(item, dict):
+            return
+        name = (item.get("name") or item.get("label") or "").strip()
+        name_lower = name.lower()
+        if name_lower == "caster" or re.match(r"^caster\s*\(\s*\d+\s*\)\s*$", name_lower):
+            is_caster = True
+            caster_level = max(caster_level, _caster_level_from_loadout_item(item))
+        elif _is_flavor_caster_name(name):
+            is_caster = True
+            caster_level = max(caster_level, _caster_level_from_loadout_item({"name": name, "label": name}))
+        for key in ("rules", "effects", "options", "choices", "content"):
+            for sub in (item.get(key) or []):
+                if isinstance(sub, dict):
+                    n = (sub.get("name") or sub.get("label") or "").strip().lower()
+                    if n == "caster":
+                        is_caster = True
+                        caster_level = max(caster_level, int(sub.get("rating")) if sub.get("rating") is not None else 1)
+                    check_item(sub)
+
+    for up in upgrades:
+        check_item(up)
+    return is_caster, caster_level
+
+
 async def log_event(
     session: AsyncSession,
     game: Game,
@@ -359,9 +471,23 @@ class ProxyController(Controller):
         
         for unit_data in units_data:
             try:
-                # Parse special rules
+                # Parse special rules (from rules array)
                 rules = unit_data.get("rules", [])
                 props = parse_special_rules(rules)
+                # Caster can appear in loadout in Army Forge; treat as skill and move to Rules
+                loadout_raw = unit_data.get("loadout", [])
+                loadout_is_caster, loadout_caster_level, loadout_filtered, rules_from_loadout = parse_loadout_for_caster(loadout_raw)
+                upgrades_raw = unit_data.get("selectedUpgrades") or []
+                upgrade_is_caster, upgrade_caster_level = parse_upgrades_for_caster(upgrades_raw)
+                if loadout_is_caster or upgrade_is_caster:
+                    props["is_caster"] = True
+                    props["caster_level"] = max(
+                        props["caster_level"] or 0,
+                        loadout_caster_level or 0,
+                        upgrade_caster_level or 0,
+                        1,
+                    )
+                rules = rules + rules_from_loadout
                 
                 unit_name = unit_data.get("name", "Unknown Unit")
                 logger.debug(f"Creating unit: {unit_name} (Q{unit_data.get('quality', 4)}+ D{unit_data.get('defense', 4)}+)")
@@ -376,7 +502,7 @@ class ProxyController(Controller):
                     size=unit_data.get("size", 1),
                     tough=props["tough"],
                     cost=unit_data.get("cost", 0),
-                    loadout=unit_data.get("loadout"),
+                    loadout=loadout_filtered,
                     rules=rules,
                     upgrades=unit_data.get("selectedUpgrades"),
                     army_forge_id=unit_data.get("id"),
@@ -407,11 +533,18 @@ class ProxyController(Controller):
                     else DeploymentStatus.DEPLOYED
                 )
                 
+                unit_notes = unit_data.get("notes")
+                if isinstance(unit_notes, str):
+                    unit_notes = unit_notes.strip() or None
+                else:
+                    unit_notes = None
+
                 state = UnitState(
                     unit_id=unit.id,
                     models_remaining=unit.size,
                     spell_tokens=props["caster_level"] if props["is_caster"] else 0,
                     deployment_status=initial_deployment,
+                    custom_notes=unit_notes,
                 )
                 session.add(state)
                 
@@ -455,14 +588,103 @@ class ProxyController(Controller):
         
         # Update player stats (accumulate instead of replace)
         player.army_forge_list_id = list_id
-        army_name = f"Imported Army ({units_created} units)"
+
+        # Fetch army book for spells, faction rules, and metadata
+        army_id = None
+        game_system = army_data.get("gameSystem")
+        for u in units_data:
+            if isinstance(u, dict) and u.get("armyId"):
+                army_id = u["armyId"]
+                break
+
+        army_book: dict = {}
+        if army_id and game_system:
+            try:
+                async with httpx.AsyncClient() as book_client:
+                    book_resp = await book_client.get(
+                        f"https://army-forge.onepagerules.com/api/army-books/{army_id}?gameSystem={game_system}",
+                        timeout=10.0,
+                    )
+                    book_resp.raise_for_status()
+                    army_book = book_resp.json()
+                    logger.info(
+                        f"Fetched army book '{army_book.get('name', '?')}' "
+                        f"v{army_book.get('versionString', '?')}: "
+                        f"{len(army_book.get('spells', []))} spells, "
+                        f"{len(army_book.get('specialRules', []))} rules"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not fetch army book for {army_id}: {e}")
+
+        # Army identity (merge with existing if re-importing)
+        faction = army_book.get("factionName") or army_book.get("name")
+        if faction:
+            if player.faction_name and player.faction_name != faction:
+                army_name = f"{player.faction_name} + {faction}"
+                player.faction_name = army_name
+            else:
+                army_name = faction
+                player.faction_name = faction
+        else:
+            army_name = player.army_name or f"Imported Army ({units_created} units)"
         player.army_name = army_name
-        # Accumulate units and points instead of replacing
+        player.army_book_version = army_book.get("versionString") or player.army_book_version
+
+        # Spells (merge with existing, deduplicate by name)
+        existing_spells = player.spells or []
+        existing_spell_names = {s["name"] for s in existing_spells if isinstance(s, dict)}
+        spells_raw = army_book.get("spells") or army_data.get("spells") or []
+        if isinstance(spells_raw, list) and spells_raw:
+            parsed_spells = list(existing_spells)
+            for s in spells_raw:
+                if not isinstance(s, dict):
+                    continue
+                spell_name = s.get("name", "")
+                if spell_name in existing_spell_names:
+                    continue
+                threshold = s.get("threshold")
+                if threshold is not None:
+                    try:
+                        casting_value = 3 + int(threshold)
+                    except (ValueError, TypeError):
+                        casting_value = 4
+                else:
+                    try:
+                        casting_value = int(s.get("cost", s.get("value", 4)))
+                    except (ValueError, TypeError):
+                        casting_value = 4
+                parsed_spells.append({
+                    "name": spell_name,
+                    "cost": casting_value,
+                    "description": s.get("effect", s.get("description", s.get("text", ""))),
+                })
+            player.spells = parsed_spells or None
+
+        # Faction special rules (merge with existing, deduplicate by name)
+        existing_rules = player.special_rules or []
+        existing_rule_names = {r["name"] for r in existing_rules if isinstance(r, dict)}
+        rules_raw = army_book.get("specialRules") or []
+        if isinstance(rules_raw, list) and rules_raw:
+            parsed_rules = list(existing_rules)
+            for r in rules_raw:
+                if not isinstance(r, dict) or not r.get("name"):
+                    continue
+                if r["name"] in existing_rule_names:
+                    continue
+                parsed_rules.append({
+                    "name": r["name"],
+                    "description": r.get("description", ""),
+                    "hasRating": r.get("hasRating", False),
+                })
+            player.special_rules = parsed_rules or None
+
+        # Accumulate units and points (supports multi-list imports)
         player.starting_unit_count = (player.starting_unit_count or 0) + units_created
         player.starting_points = (player.starting_points or 0) + total_points
         
-        # Log the import - create event directly to avoid relationship access
-        event = GameEvent(
+        # Log the import (use .create() for consistency; can't use log_event()
+        # because the game object may be stale after earlier flushes)
+        event = GameEvent.create(
             game_id=game_id,
             player_id=player_id,
             event_type=EventType.ARMY_IMPORTED,

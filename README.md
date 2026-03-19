@@ -5,14 +5,19 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 ## Features
 - Create/join games via code; player identity persistence with selection modal
 - Real-time updates over WebSockets (player join, state updates)
-- Unit tracking: wounds/models, activation, morale threshold; transports; limited weapons
+- Unit tracking: wounds/models, activation, morale threshold; transports; limited weapons; unit notes display
 - **Victory Points**: Manual +/- interface with log consolidation (removals delete corresponding "add" entries)
 - **Round Tracker**: Manual +/- interface for round tracking
 - **Time-based Wound Tracking**: Wounds removed within 30 seconds delete the log entry (quick corrections); wounds removed after 30 seconds log as heals
 - **Attached Units**: Heroes attached to parent units are visually grouped and controlled together; single activate button for combined units; each unit (and attached hero) has expandable details (rules, loadout, upgrades)
 - **Unit Detachment**: Manual detachment of heroes from parent units; automatic detachment when parent is destroyed
 - **Shaken/Unshaken Logging**: All shaken state changes are logged with proper event tracking
-- **Unit Action Logging**: Log unit actions (Rush, Advance, Hold, Charge, Attack) with target selection for Charge/Attack actions
+- **Unit Action Logging**: Log unit actions (Rush, Advance, Hold, Charge, Attack) with target selection for Charge/Attack actions; progressive action wizard respects GDF activation sequencing (move → cast → attack)
+- **Spell Casting**: Caster units auto-detected from rules/loadout/upgrades; spell token pool with auto-grant per round; cast recording with player-reported success/failure; once per activation
+- **Collapsible UI Sections**: All major sections (armies, spells, VP, log, lobby, etc.) are collapsible with `+`/`−` indicators; state persists in localStorage
+- **Unit Editing (Lobby)**: Rename or delete individual units before the game starts
+- **Rules Tooltips**: Hover/tap GDF special rule badges to see full rules text in a viewport-aware floating tooltip
+- **Player Spells Viewer**: Imported spells from Army Forge displayed in collapsible sections per player
 - Action log: Automatic logging of all game state changes with human-readable descriptions
 - **Event Log Export**: Export game event log as markdown file
 - **Clear Event Log**: Clear all events from a game (with confirmation); rate-limited (5 per minute per game)
@@ -105,6 +110,11 @@ Test coverage includes:
 - Event log export and clear events
 - Manual unit creation with rules, loadout, and upgrades (response and GET game include upgrades)
 - Clear-events rate limiting (6th call in short window returns 429)
+- Unit deletion (lobby only, rejects after start, 404 for missing units)
+- Unit profile editing (rename, clear custom name, rejects after start)
+- Spell casting (success/failure recording, token deduction, insufficient tokens, non-caster rejection)
+- Effective caster detection (`get_effective_caster` unit tests: DB flags, rules-derived, minimum level clamping)
+- Stat modification parsing (`parse_stat_modifications`: rule-name-gated rating extraction)
 
 ### End-to-End (Playwright)
 Requires server at `http://localhost:8000`.
@@ -121,6 +131,9 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - `POST /api/proxy/import-army/{code}` – import Army Forge list (`army_forge_url`, `player_id`) - **adds units** (does not clear existing)
 - `POST /api/games/{code}/units/manual` – create unit manually (`CreateUnitRequest`: name, quality, defense, size, tough, cost; optional `rules`, `loadout`, `upgrades`; Advanced JSON overrides when provided)
 - `POST /api/games/{code}/units/{unit_id}/actions` – log unit action (`action`: rush/advance/hold/charge/attack, `target_unit_ids` optional for charge/attack)
+- `DELETE /api/games/{code}/units/{unit_id}` – delete a single unit (lobby only)
+- `PATCH /api/games/{code}/units/{unit_id}/profile` – update unit profile fields (e.g. `custom_name`; lobby only)
+- `POST /api/games/{code}/units/{unit_id}/cast` – record a spell cast result (`spell_value`, `spell_name`, `success`)
 - `DELETE /api/games/{code}/players/{player_id}/units` – clear all units for a player (lobby only)
 - `DELETE /api/games/{code}/events` – clear all events for a game
 - `GET /api/games/{code}` – fetch game state (players, units, events)
@@ -151,9 +164,11 @@ Spec `tests/e2e/join-import.spec.ts`: host creates, guest joins via code, modal 
 - **Expandable details**: Each unit card (and each attached hero) has a "Show/Hide details" section with **Rules** (badges), **Weapons/Equipment** (list), and **Upgrades** (human-readable; no raw JSON). Same formatting for imported and manually added units.
 
 ## Unit Actions
-- **Action Logging**: When activating a unit, select an action (Rush, Advance, Hold, Charge, or Attack)
+- **Action Logging**: When activating a unit, a progressive wizard guides through the activation sequence following GDF rules
+- **Activation Sequence**: Move (Rush/Advance/Hold) → Cast Spell (optional, before attack) → Attack/Charge (context-dependent)
 - **Target Selection**: For Charge and Attack actions, select one or more opposing units as targets
-- **Action Events**: All actions are logged in the event log with descriptions like "Unit charged Target Unit" or "Unit advanced"
+- **Spell Casting**: Caster units can cast one spell per activation; player rolls dice themselves and records success/failure; tokens deducted regardless of outcome
+- **Action Events**: All actions are logged in the event log with descriptions like "Unit charged Target Unit" or "Unit cast Smite — succeeded"
 - **Attached Units**: When a unit with attached heroes performs an action, the heroes are automatically activated but don't get separate action logs
 
 ## Event Log Management

@@ -1707,3 +1707,357 @@ async def test_game_board_returns_template_for_non_admin(client):
     assert resp.status_code == 200
     assert "game_code" in resp.text or "XYZZ" in resp.text
 
+
+# --- Unit deletion (single unit, lobby only) ---
+
+
+async def _create_game_with_unit(client, *, is_caster=False, caster_level=0):
+    """Helper: create a game, get host player, create a manual unit, return (code, host_id, unit_id)."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "UnitTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+    payload = {
+        "player_id": host_id,
+        "name": "Test Squad",
+        "quality": 3,
+        "defense": 4,
+        "size": 3,
+        "tough": 1,
+        "cost": 100,
+        "is_caster": is_caster,
+        "caster_level": caster_level,
+    }
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp_unit = await client.post(f"/api/games/{code}/units/manual", json=payload)
+    assert resp_unit.status_code == 201
+    unit_id = resp_unit.json()["id"]
+    return code, host_id, unit_id
+
+
+@pytest.mark.asyncio
+async def test_delete_unit_in_lobby(client):
+    """Deleting a unit in lobby removes it and updates player stats."""
+    code, host_id, unit_id = await _create_game_with_unit(client)
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.delete(f"/api/games/{code}/units/{unit_id}")
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+    game = (await client.get(f"/api/games/{code}")).json()
+    host = next(p for p in game["players"] if p["id"] == host_id)
+    assert host["starting_unit_count"] == 0
+    assert host["starting_points"] == 0
+
+    units = game.get("units", [])
+    assert all(u["id"] != unit_id for u in units)
+
+
+@pytest.mark.asyncio
+async def test_delete_unit_not_found(client):
+    """Deleting a non-existent unit returns 404."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "DelNF", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    fake_id = str(uuid.uuid4())
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.delete(f"/api/games/{code}/units/{fake_id}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_unit_after_start_rejected(client):
+    """Deleting a unit after the game has started is rejected."""
+    code, host_id, unit_id = await _create_game_with_unit(client)
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+    guest_id = next(p["id"] for p in join_resp.json()["players"] if p["name"] == "Guest")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/units/manual", json={
+            "player_id": guest_id, "name": "Guest Squad",
+            "quality": 4, "defense": 4, "size": 1, "tough": 1, "cost": 50,
+        })
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        start_resp = await client.post(f"/api/games/{code}/start")
+    assert start_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.delete(f"/api/games/{code}/units/{unit_id}")
+    assert resp.status_code in (400, 422, 500)
+
+
+# --- Unit profile editing (rename, lobby only) ---
+
+
+@pytest.mark.asyncio
+async def test_rename_unit_in_lobby(client):
+    """Renaming a unit in lobby sets custom_name and returns updated unit."""
+    code, host_id, unit_id = await _create_game_with_unit(client)
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.patch(
+            f"/api/games/{code}/units/{unit_id}/profile",
+            json={"custom_name": "Alpha Squad"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["custom_name"] == "Alpha Squad"
+
+
+@pytest.mark.asyncio
+async def test_rename_unit_empty_clears_name(client):
+    """Sending empty string for custom_name clears it back to None."""
+    code, host_id, unit_id = await _create_game_with_unit(client)
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.patch(
+            f"/api/games/{code}/units/{unit_id}/profile",
+            json={"custom_name": "Temp Name"},
+        )
+        resp = await client.patch(
+            f"/api/games/{code}/units/{unit_id}/profile",
+            json={"custom_name": ""},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["custom_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_rename_unit_after_start_rejected(client):
+    """Renaming a unit after the game has started is rejected."""
+    code, host_id, unit_id = await _create_game_with_unit(client)
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+    guest_id = next(p["id"] for p in join_resp.json()["players"] if p["name"] == "Guest")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/units/manual", json={
+            "player_id": guest_id, "name": "Guest Squad",
+            "quality": 4, "defense": 4, "size": 1, "tough": 1, "cost": 50,
+        })
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.patch(
+            f"/api/games/{code}/units/{unit_id}/profile",
+            json={"custom_name": "Nope"},
+        )
+    assert resp.status_code in (400, 422, 500)
+
+
+# --- Spell casting (record success/failure, token deduction) ---
+
+
+@pytest.mark.asyncio
+async def test_cast_spell_success_deducts_tokens(client):
+    """Casting a spell as success deducts tokens and logs the event."""
+    code, host_id, unit_id = await _create_game_with_unit(
+        client, is_caster=True, caster_level=2,
+    )
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.post(
+            f"/api/games/{code}/units/{unit_id}/cast",
+            json={"spell_value": 1, "spell_name": "Smite", "success": True},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["success"] is True
+    assert "succeeded" in data["message"]
+
+    game = (await client.get(f"/api/games/{code}")).json()
+    unit = next(u for u in game["units"] if u["id"] == unit_id)
+    assert unit["state"]["spell_tokens"] == 1
+
+    events = (await client.get(f"/api/games/{code}/events?limit=50")).json()
+    cast_events = [e for e in events if e["event_type"] == "spell_cast"]
+    assert len(cast_events) >= 1
+    assert "Smite" in cast_events[0]["description"]
+
+
+@pytest.mark.asyncio
+async def test_cast_spell_failure_still_deducts_tokens(client):
+    """A failed cast still deducts the token cost."""
+    code, host_id, unit_id = await _create_game_with_unit(
+        client, is_caster=True, caster_level=2,
+    )
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.post(
+            f"/api/games/{code}/units/{unit_id}/cast",
+            json={"spell_value": 1, "spell_name": "Smite", "success": False},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["success"] is False
+    assert "failed" in data["message"]
+
+    game = (await client.get(f"/api/games/{code}")).json()
+    unit = next(u for u in game["units"] if u["id"] == unit_id)
+    assert unit["state"]["spell_tokens"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_spell_insufficient_tokens(client):
+    """Casting a spell with insufficient tokens is rejected."""
+    code, host_id, unit_id = await _create_game_with_unit(
+        client, is_caster=True, caster_level=1,
+    )
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.post(
+            f"/api/games/{code}/units/{unit_id}/cast",
+            json={"spell_value": 1, "spell_name": "Smite", "success": True},
+        )
+    assert resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp2 = await client.post(
+            f"/api/games/{code}/units/{unit_id}/cast",
+            json={"spell_value": 1, "spell_name": "Smite", "success": True},
+        )
+    assert resp2.status_code in (400, 422, 500)
+
+
+@pytest.mark.asyncio
+async def test_cast_spell_non_caster_rejected(client):
+    """Non-caster units cannot cast spells."""
+    code, host_id, unit_id = await _create_game_with_unit(
+        client, is_caster=False, caster_level=0,
+    )
+
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        resp = await client.post(
+            f"/api/games/{code}/units/{unit_id}/cast",
+            json={"spell_value": 1, "spell_name": "Smite", "success": True},
+        )
+    assert resp.status_code in (400, 422, 500)
+
+
+@pytest.mark.asyncio
+async def test_transport_destroyed_auto_disembarks_passengers(client):
+    """When a transport is destroyed, embarked units are auto-disembarked and shaken."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "TransportTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+
+    # Create a transport
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        t_resp = await client.post(f"/api/games/{code}/units/manual", json={
+            "player_id": host_id, "name": "APC", "quality": 4, "defense": 3,
+            "size": 1, "tough": 3, "cost": 150,
+            "is_transport": True, "transport_capacity": 5,
+        })
+    assert t_resp.status_code == 201
+    transport_id = t_resp.json()["id"]
+
+    # Create a passenger unit
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        p_resp = await client.post(f"/api/games/{code}/units/manual", json={
+            "player_id": host_id, "name": "Infantry", "quality": 4, "defense": 4,
+            "size": 5, "tough": 1, "cost": 100,
+        })
+    assert p_resp.status_code == 201
+    passenger_id = p_resp.json()["id"]
+
+    # Add a second player and start the game
+    join_resp = await client.post(
+        f"/api/games/{code}/join",
+        json={"player_name": "Guest", "player_color": "#222222"},
+    )
+    assert join_resp.status_code == 201
+    guest_id = join_resp.json()["your_player_id"]
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        g_resp = await client.post(f"/api/games/{code}/units/manual", json={
+            "player_id": guest_id, "name": "Enemy", "quality": 4, "defense": 4,
+            "size": 3, "tough": 1, "cost": 100,
+        })
+    assert g_resp.status_code == 201
+
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        await client.post(f"/api/games/{code}/start")
+
+    # Embark the infantry into the transport
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        embark_resp = await client.patch(
+            f"/api/games/{code}/units/{passenger_id}",
+            json={"transport_id": transport_id},
+        )
+    assert embark_resp.status_code == 200
+    assert embark_resp.json()["state"]["deployment_status"] == "embarked"
+
+    # Destroy the transport
+    with patch("app.api.game_helpers.broadcast_to_game", new=AsyncMock()):
+        destroy_resp = await client.patch(
+            f"/api/games/{code}/units/{transport_id}",
+            json={"deployment_status": "destroyed"},
+        )
+    assert destroy_resp.status_code == 200
+
+    # Verify the passenger was auto-disembarked and shaken
+    game_resp = await client.get(f"/api/games/{code}")
+    assert game_resp.status_code == 200
+    passenger_data = next(
+        u for u in game_resp.json()["units"] if u["id"] == passenger_id
+    )
+    assert passenger_data["state"]["deployment_status"] == "deployed"
+    assert passenger_data["state"]["transport_id"] is None
+    assert passenger_data["state"]["is_shaken"] is True
+

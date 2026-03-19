@@ -61,6 +61,19 @@ class LogUnitActionRequest(BaseModel):
     )
 
 
+class CastSpellRequest(BaseModel):
+    """Record a spell cast result (during activation, before attacks)."""
+    spell_value: int = Field(ge=1, le=6, description="Token cost of the spell")
+    spell_name: Optional[str] = Field(default=None, max_length=100, description="Spell name for log")
+    target_unit_id: Optional[uuid.UUID] = Field(default=None, description="Target unit if applicable")
+    success: bool = Field(description="Whether the cast succeeded (player rolls dice themselves)")
+
+
+class UpdateUnitProfileRequest(BaseModel):
+    """Request to edit a unit's profile fields (lobby only)."""
+    custom_name: Optional[str] = Field(default=None, max_length=100, description="Custom display name")
+
+
 class UpdateObjectiveRequest(BaseModel):
     """Request to update an objective's state."""
     status: ObjectiveStatus
@@ -158,9 +171,15 @@ class PlayerResponse(BaseModel):
     is_host: bool
     is_connected: bool
     army_name: Optional[str]
+    army_forge_list_id: Optional[str] = None
     starting_unit_count: int
     starting_points: int
     victory_points: int
+    has_finished_activations: bool = False
+    spells: Optional[List[Any]] = None
+    special_rules: Optional[List[Any]] = None
+    faction_name: Optional[str] = None
+    army_book_version: Optional[str] = None
 
     class Config:
         from_attributes = True
