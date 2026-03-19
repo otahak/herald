@@ -96,10 +96,12 @@ async def check_migration_status(engine) -> dict:
         "has_expiration": False,
         "has_unit_detached": False,
         "has_unit_actions": False,
+        "has_player_army_book": False,
     }
     
     # Check for solo mode column
     status["has_solo_mode"] = await check_column_exists(engine, "games", "is_solo")
+    status["has_player_army_book"] = await check_column_exists(engine, "players", "faction_name")
     
     # Check for expiration tracking
     status["has_expiration"] = await check_column_exists(engine, "games", "last_activity_at")
@@ -195,6 +197,9 @@ async def main():
         
         if not status["has_unit_actions"]:
             migrations_to_run.append(DEPLOY_DIR / "migrate_add_unit_action_events.py")
+        
+        if not status["has_player_army_book"]:
+            migrations_to_run.append(DEPLOY_DIR / "migrate_add_player_army_book.py")
         
         if not migrations_to_run:
             print("✓ All migrations are up to date")

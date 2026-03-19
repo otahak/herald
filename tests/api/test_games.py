@@ -102,6 +102,98 @@ async def test_import_army_broadcasts_state_update(client):
 
 
 @pytest.mark.asyncio
+async def test_import_army_share_api_fallback_on_tts_500(client):
+    """When TTS API returns 500, fall back to share API + army books."""
+    resp = await client.post(
+        "/api/games",
+        json={"name": "ShareFallbackTest", "player_name": "Host", "player_color": "#111111"},
+    )
+    code = resp.json()["code"]
+    host_id = resp.json()["players"][0]["id"]
+
+    share_data = {
+        "gameSystem": "gf",
+        "units": [
+            {
+                "id": "unit1",
+                "selectionId": "sel1",
+                "armyId": "army1",
+                "customName": None,
+                "joinToUnit": None,
+                "combined": False,
+                "selectedUpgrades": [],
+            },
+        ],
+    }
+    army_book = {
+        "name": "Test Faction",
+        "versionString": "1.0",
+        "units": [
+            {
+                "id": "unit1",
+                "name": "Veteran Squad",
+                "quality": 4,
+                "defense": 4,
+                "size": 5,
+                "cost": 100,
+                "rules": [{"name": "Tough", "rating": 1}],
+                "weapons": [{"name": "Rifle", "range": 24, "attacks": 1, "specialRules": []}],
+                "items": [],
+            },
+        ],
+        "spells": [],
+        "specialRules": [],
+    }
+
+    call_count = 0
+
+    async def fake_get(url, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if "api/tts" in url:
+            class TTS500:
+                status_code = 500
+                text = ""
+                def raise_for_status(self):
+                    import httpx
+                    raise httpx.HTTPStatusError("500", request=None, response=self)
+                def json(self):
+                    return {}
+            return TTS500()
+        if "api/share" in url:
+            class ShareOK:
+                status_code = 200
+                def raise_for_status(self): ...
+                def json(self):
+                    return share_data
+            return ShareOK()
+        if "api/army-books" in url:
+            class BookOK:
+                status_code = 200
+                def raise_for_status(self): ...
+                def json(self):
+                    return army_book
+            return BookOK()
+        raise ValueError(f"Unexpected URL: {url}")
+
+    with patch("app.api.proxy.httpx.AsyncClient.get", new=AsyncMock(side_effect=fake_get)), patch(
+        "app.api.proxy.broadcast_to_game", new=AsyncMock()
+    ):
+        resp_import = await client.post(
+            f"/api/proxy/import-army/{code}",
+            json={"army_forge_url": "https://army-forge.onepagerules.com/share?id=ASHEMPACT", "player_id": host_id},
+        )
+    assert resp_import.status_code in (200, 201), resp_import.text
+    data = resp_import.json()
+    assert data["units_imported"] == 1
+    assert "Test Faction" in data["army_name"]
+
+    updated = await client.get(f"/api/games/{code}")
+    units = updated.json().get("units", [])
+    assert any(u["name"] == "Veteran Squad" for u in units)
+
+
+@pytest.mark.asyncio
 async def test_player_join_broadcasts(client):
     # create game
     resp = await client.post(
