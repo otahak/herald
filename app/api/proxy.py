@@ -645,17 +645,20 @@ class ProxyController(Controller):
                 threshold = s.get("threshold")
                 if threshold is not None:
                     try:
-                        casting_value = 3 + int(threshold)
+                        token_cost = int(threshold)
                     except (ValueError, TypeError):
-                        casting_value = 4
+                        token_cost = 1
+                    casting_roll = token_cost + 3
                 else:
                     try:
-                        casting_value = int(s.get("cost", s.get("value", 4)))
+                        token_cost = int(s.get("cost", s.get("value", 1)))
                     except (ValueError, TypeError):
-                        casting_value = 4
+                        token_cost = 1
+                    casting_roll = token_cost + 3
                 parsed_spells.append({
                     "name": spell_name,
-                    "cost": casting_value,
+                    "cost": token_cost,
+                    "casting_roll": casting_roll,
                     "description": s.get("effect", s.get("description", s.get("text", ""))),
                 })
             player.spells = parsed_spells or None
