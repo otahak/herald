@@ -151,11 +151,157 @@ def _weapon_to_loadout_item(w: dict) -> dict:
     }
 
 
-def _share_unit_to_tts(share_unit: dict, book_unit: dict | None) -> dict:
+def _upgrade_options_by_uid(book: dict) -> dict[str, dict]:
+    """Map Army Forge upgrade option uid/id -> option object (from upgradePackages)."""
+    out: dict[str, dict] = {}
+    for pkg in book.get("upgradePackages") or []:
+        if not isinstance(pkg, dict):
+            continue
+        for sec in pkg.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            for opt in sec.get("options") or []:
+                if not isinstance(opt, dict):
+                    continue
+                for key in (opt.get("uid"), opt.get("id")):
+                    if key:
+                        out[str(key)] = opt
+    return out
+
+
+def _enrich_share_upgrades_for_display(selected: list, book: dict | None) -> list:
+    """Turn raw {optionId, upgradeId, instanceId} rows into objects with label for the UI."""
+    if not selected:
+        return []
+    if not book:
+        return list(selected)
+    by_uid = _upgrade_options_by_uid(book)
+    out: list = []
+    for su in selected:
+        if not isinstance(su, dict):
+            continue
+        oid = su.get("optionId")
+        opt = by_uid.get(str(oid)) if oid else None
+        label = (opt.get("label") or "").strip() if opt else ""
+        if label:
+            out.append({
+                "label": label,
+                "optionId": su.get("optionId"),
+                "upgradeId": su.get("upgradeId"),
+                "instanceId": su.get("instanceId"),
+            })
+        else:
+            out.append(su)
+    return out
+
+
+def _merge_campaign_traits_into_rules(rules: list, share_unit: dict) -> None:
+    """Append narrative/campaign traits from share API as rule badges."""
+    existing = {
+        ((r.get("name") or r.get("label") or "").strip().lower())
+        for r in rules
+        if isinstance(r, dict)
+    }
+    for t in share_unit.get("traits") or []:
+        if not isinstance(t, str):
+            continue
+        name = t.strip()
+        if not name:
+            continue
+        low = name.lower()
+        if low in existing:
+            continue
+        rules.append({"name": name, "rating": None})
+        existing.add(low)
+
+
+def _apply_share_upgrades_from_book(
+    selected: list,
+    book: dict | None,
+    rules: list,
+    loadout: list,
+    base_defense: int,
+) -> int:
+    """
+    Apply upgrade-option gains (rules, weapons, Armor) from the army book.
+    Returns defense value after applying Armor(X) from upgrade content, if any.
+    """
+    defense = base_defense
+    if not book or not selected:
+        return defense
+    by_uid = _upgrade_options_by_uid(book)
+    seen_rules = {
+        (
+            str((r.get("name") or r.get("label") or "")).strip().lower(),
+            r.get("rating"),
+        )
+        for r in rules
+        if isinstance(r, dict)
+    }
+
+    for su in selected:
+        if not isinstance(su, dict):
+            continue
+        oid = su.get("optionId")
+        if not oid:
+            continue
+        opt = by_uid.get(str(oid))
+        if not opt:
+            continue
+        for gain in opt.get("gains") or []:
+            if not isinstance(gain, dict):
+                continue
+            gtype = gain.get("type") or ""
+            if gtype == "ArmyBookWeapon" or (
+                gain.get("range") is not None and gain.get("attacks") is not None
+            ):
+                w = {
+                    "name": gain.get("name") or gain.get("label") or "Weapon",
+                    "label": gain.get("label"),
+                    "range": gain.get("range"),
+                    "attacks": gain.get("attacks"),
+                    "specialRules": gain.get("specialRules"),
+                }
+                loadout.append(_weapon_to_loadout_item(w))
+            for item in gain.get("content") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = (item.get("name") or item.get("label") or "").strip()
+                if not name:
+                    continue
+                rating = item.get("rating")
+                low = name.lower()
+                key = (low, rating)
+                if key in seen_rules:
+                    continue
+                rules.append({"name": name, "rating": rating})
+                seen_rules.add(key)
+                if low == "armor" and rating is not None:
+                    try:
+                        defense = int(rating)
+                    except (ValueError, TypeError):
+                        pass
+    return defense
+
+
+def _share_notes(share_unit: dict) -> Optional[str]:
+    n = share_unit.get("notes")
+    if isinstance(n, str):
+        n = n.strip()
+        return n or None
+    return None
+
+
+def _share_unit_to_tts(
+    share_unit: dict,
+    book_unit: dict | None,
+    army_book: Optional[dict] = None,
+) -> dict:
     """Convert share API unit + army book unit to TTS-style unit dict.
-    If book_unit is None (army book unavailable), return a placeholder unit."""
+    army_book is the full book JSON (for upgradePackages). If book_unit is None,
+    return a placeholder unit."""
     if book_unit is None:
-        return _share_unit_to_tts_placeholder(share_unit)
+        return _share_unit_to_tts_placeholder(share_unit, army_book)
     loadout = []
     for w in book_unit.get("weapons") or []:
         loadout.append(_weapon_to_loadout_item(w))
@@ -165,6 +311,16 @@ def _share_unit_to_tts(share_unit: dict, book_unit: dict | None) -> dict:
     for r in book_unit.get("rules") or []:
         if isinstance(r, dict):
             rules.append({"name": r.get("name", r.get("label", "")), "rating": r.get("rating")})
+    _merge_campaign_traits_into_rules(rules, share_unit)
+
+    selected = share_unit.get("selectedUpgrades") or []
+    try:
+        base_defense = int(book_unit.get("defense", 4))
+    except (ValueError, TypeError):
+        base_defense = 4
+    defense = _apply_share_upgrades_from_book(selected, army_book, rules, loadout, base_defense)
+    enriched = _enrich_share_upgrades_for_display(selected, army_book)
+
     return {
         "id": share_unit.get("id"),
         "selectionId": share_unit.get("selectionId", share_unit.get("id")),
@@ -172,20 +328,30 @@ def _share_unit_to_tts(share_unit: dict, book_unit: dict | None) -> dict:
         "name": book_unit.get("name", "Unknown Unit"),
         "customName": share_unit.get("customName"),
         "quality": book_unit.get("quality", 4),
-        "defense": book_unit.get("defense", 4),
+        "defense": defense,
         "size": book_unit.get("size", 1),
         "cost": book_unit.get("cost", 0),
         "loadout": loadout,
         "rules": rules,
-        "selectedUpgrades": share_unit.get("selectedUpgrades") or [],
+        "selectedUpgrades": enriched,
         "joinToUnit": share_unit.get("joinToUnit"),
         "combined": share_unit.get("combined", False),
+        "notes": _share_notes(share_unit),
     }
 
 
-def _share_unit_to_tts_placeholder(share_unit: dict) -> dict:
+def _share_unit_to_tts_placeholder(
+    share_unit: dict,
+    army_book: Optional[dict] = None,
+) -> dict:
     """Create a minimal TTS-style unit when army book is unavailable (e.g. list/army private in Army Forge Studio)."""
     name = share_unit.get("customName") or "Unit (army book unavailable)"
+    rules = []
+    _merge_campaign_traits_into_rules(rules, share_unit)
+    loadout = []
+    selected = share_unit.get("selectedUpgrades") or []
+    defense = _apply_share_upgrades_from_book(selected, army_book, rules, loadout, 4)
+    enriched = _enrich_share_upgrades_for_display(selected, army_book)
     return {
         "id": share_unit.get("id"),
         "selectionId": share_unit.get("selectionId", share_unit.get("id")),
@@ -193,14 +359,15 @@ def _share_unit_to_tts_placeholder(share_unit: dict) -> dict:
         "name": name,
         "customName": None,  # Already used as name
         "quality": 4,
-        "defense": 4,
+        "defense": defense,
         "size": 1,
         "cost": 0,
-        "loadout": [],
-        "rules": [],
-        "selectedUpgrades": share_unit.get("selectedUpgrades") or [],
+        "loadout": loadout,
+        "rules": rules,
+        "selectedUpgrades": enriched,
         "joinToUnit": share_unit.get("joinToUnit"),
         "combined": share_unit.get("combined", False),
+        "notes": _share_notes(share_unit),
     }
 
 
@@ -544,9 +711,10 @@ class ProxyController(Controller):
                         aid = su.get("armyId")
                         uid = su.get("id")
                         book_unit = book_units_by_id.get((aid, uid)) if aid and uid else None
+                        book_full = (army_books.get(aid) if aid else None) or {}
                         if book_unit is None and (aid or uid):
                             logger.info(f"Army book unavailable for unit {uid} (army {aid}), using placeholder (list/army may be private)")
-                        tts_units.append(_share_unit_to_tts(su, book_unit))
+                        tts_units.append(_share_unit_to_tts(su, book_unit, book_full))
                     army_data = {
                         "gameSystem": game_system,
                         "units": tts_units,
@@ -644,6 +812,8 @@ class ProxyController(Controller):
                 unit_notes = unit_data.get("notes")
                 if isinstance(unit_notes, str):
                     unit_notes = unit_notes.strip() or None
+                    if unit_notes and len(unit_notes) > 500:
+                        unit_notes = unit_notes[:497] + "..."
                 else:
                     unit_notes = None
 
