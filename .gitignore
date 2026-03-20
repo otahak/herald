@@ -46,6 +46,8 @@ build/
 
 # Debug scripts (untracked)
 scripts/
+!scripts/
+!scripts/build_gamestore.py
 
 # Keep this file tracked
 !.gitignore
