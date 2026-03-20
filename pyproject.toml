@@ -16,6 +16,21 @@ dependencies = [
     "itsdangerous>=2.1.0",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+# SQLAlchemy async uses greenlets; without this, coverage misses most route-handler lines after awaits.
+[tool.coverage.run]
+source = ["app"]
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+]
+
 [tool.uv]
 dev-dependencies = [
     "pytest",

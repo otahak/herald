@@ -55,16 +55,21 @@ def load_env_file_fallback():
                 _conditional_print(f"[Herald] Warning: Could not load .env file from {env_file}: {e}")
     return False
 
+
+def ensure_oauth_from_dotenv() -> None:
+    """Load .env for Google OAuth if credentials are missing. Runs at import; callable from tests."""
+    if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
+        _conditional_print("[Herald] OAuth credentials not in environment, loading from .env file...")
+        load_env_file_fallback()
+        if getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"):
+            _conditional_print("[Herald] ✓ OAuth credentials loaded from .env file")
+        else:
+            _conditional_print("[Herald] ⚠ WARNING: OAuth credentials still not found after loading .env file")
+
+
 # Load .env file if OAuth credentials aren't in environment
 # This MUST happen before importing routes/oauth modules
-if not getenv("GOOGLE_CLIENT_ID") or not getenv("GOOGLE_CLIENT_SECRET"):
-    _conditional_print("[Herald] OAuth credentials not in environment, loading from .env file...")
-    load_env_file_fallback()
-    # Verify they're now loaded
-    if getenv("GOOGLE_CLIENT_ID") and getenv("GOOGLE_CLIENT_SECRET"):
-        _conditional_print("[Herald] ✓ OAuth credentials loaded from .env file")
-    else:
-        _conditional_print("[Herald] ⚠ WARNING: OAuth credentials still not found after loading .env file")
+ensure_oauth_from_dotenv()
 
 from litestar import Litestar, Request
 from litestar.contrib.sqlalchemy.plugins import SQLAlchemyInitPlugin, SQLAlchemyAsyncConfig
@@ -94,16 +99,28 @@ logger = logging.getLogger("Herald")
 logger.info(f"Starting app in {'DEBUG' if DEBUG else 'PRODUCTION'} mode")
 logger.info(f"Database URL: {DATABASE_URL}")
 
+
+def log_google_oauth_env_status(google_client_id: str | None, google_client_secret: str | None) -> None:
+    """Log whether Google OAuth env vars are set. Callable from tests."""
+    if google_client_id and google_client_secret:
+        logger.info("✓ OAuth environment variables are present in environment")
+        logger.debug(
+            f"GOOGLE_CLIENT_ID length: {len(google_client_id)}, GOOGLE_CLIENT_SECRET length: {len(google_client_secret)}"
+        )
+    else:
+        logger.warning("⚠ OAuth environment variables NOT found in environment")
+        logger.warning(
+            f"GOOGLE_CLIENT_ID present: {bool(google_client_id)}, GOOGLE_CLIENT_SECRET present: {bool(google_client_secret)}"
+        )
+        logger.warning(
+            "This usually means the .env file is not being loaded by systemd, or the .env file has formatting issues"
+        )
+
+
 # Check OAuth environment variables at startup
 google_client_id = getenv("GOOGLE_CLIENT_ID")
 google_client_secret = getenv("GOOGLE_CLIENT_SECRET")
-if google_client_id and google_client_secret:
-    logger.info("✓ OAuth environment variables are present in environment")
-    logger.debug(f"GOOGLE_CLIENT_ID length: {len(google_client_id)}, GOOGLE_CLIENT_SECRET length: {len(google_client_secret)}")
-else:
-    logger.warning("⚠ OAuth environment variables NOT found in environment")
-    logger.warning(f"GOOGLE_CLIENT_ID present: {bool(google_client_id)}, GOOGLE_CLIENT_SECRET present: {bool(google_client_secret)}")
-    logger.warning("This usually means the .env file is not being loaded by systemd, or the .env file has formatting issues")
+log_google_oauth_env_status(google_client_id, google_client_secret)
 
 # --- SQLAlchemy config
 config = SQLAlchemyAsyncConfig(
@@ -171,8 +188,12 @@ def log_exceptions(request: Request, exc: Exception) -> Response:
     
     # For other exceptions, log with enhanced context
     log_request_error(request, exc, message="Unhandled exception occurred")
+    if DEBUG:
+        payload = {"detail": {"error": str(exc), "type": type(exc).__name__}}
+    else:
+        payload = {"detail": "An unexpected error occurred", "type": "internal_error"}
     return Response(
-        content={"detail": {"error": str(exc), "type": type(exc).__name__}},
+        content=payload,
         status_code=HTTP_500_INTERNAL_SERVER_ERROR,
         media_type="application/json"
     )

@@ -45,7 +45,7 @@ psql:
 #   just test e2e_args="--headed"      # pass flags to Playwright
 #   just test E2E=0                    # skip e2e
 test py_args="" e2e_args="":
-	uv run pytest tests/api {{py_args}}
+	uv run pytest tests/ {{py_args}}
 	if [ "${E2E:-1}" -eq 1 ]; then npm run test:e2e -- {{e2e_args}}; fi
 
 # Run a specific migration

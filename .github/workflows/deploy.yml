@@ -35,8 +35,10 @@ jobs:
         run: uv sync --frozen --no-dev
       - name: Install dev dependencies for tests
         run: uv sync --frozen --group dev
+      - name: Verify gameStore.js matches modular parts
+        run: uv run python scripts/build_gamestore.py --check
       - name: Run pytest
-        run: uv run pytest tests/api -q --tb=short
+        run: uv run pytest tests/api tests/army_forge tests/static tests/test_unit_stats.py tests/deploy -q --tb=short
 
   deploy:
     name: Deploy to Server

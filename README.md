@@ -33,15 +33,17 @@ Multiplayer-synced digital scoreboard for One Page Rules (Grimdark Future / Fire
 - Backend: Python 3.12+, Litestar, SQLAlchemy (advanced-alchemy), Postgres (asyncpg). Entry `app/main.py`; routes in `app/routes.py`.
 - Frontend: Vue 3 (CDN), TailwindCSS + DaisyUI, Jinja templates. Screens in `app/game/templates/game/board.html` and `lobby.html`.
 - Realtime: WebSockets via `app/api/websocket.py` (`state`, `state_update`, `player_joined`, `player_left`).
-- State store: `app/static/js/store/gameStore.js` (fetches, identity persistence, WS handling).
+- State store: `app/static/js/store/gameStore.js` is built from `app/static/js/store/parts/gameStore.{core,getters,actions}.js` via `uv run python scripts/build_gamestore.py` (use `--check` in CI to ensure the bundle matches the parts).
 - Data models: `app/models/*` (Game, Player, Unit, UnitState, GameEvent).
 
 ## Project Layout
 - `app/main.py` – Litestar app wiring (DB plugin, templates, routes)
-- `app/api/` – REST + WebSocket handlers (`games.py`, `proxy.py`, `websocket.py`)
+- `app/api/` – REST + WebSocket handlers (`games/` package for game lifecycle, units, events, saves; `proxy.py`, `websocket.py`)
 - `app/game/templates/game/` – UI templates (`board.html`, `lobby.html`)
 - `app/static/js/store/` – frontend reactive store + WS client
-- `tests/api/` – backend tests
+- `tests/api/games/` – games API tests (split by area: lifecycle, import, units, VP/round, solo)
+- `tests/army_forge/`, `tests/static/` – parse helpers and gameStore bundle check
+- `tests/` – other backend tests (`test_unit_stats.py`, `deploy/`, etc.)
 - `tests/e2e/` – Playwright E2E (requires running server)
 - `Justfile` – developer commands
 
@@ -99,10 +101,10 @@ For a 2GB/1vCPU droplet, the service runs 2 uvicorn workers and binds to localho
 ## Tests
 ### Backend (pytest)
 ```bash
-uv run pytest tests/api
-uv run pytest --cov=app --cov=tests/api --cov-report=term-missing
+uv run pytest tests/ -q
+uv run pytest --cov=app --cov=tests --cov-report=term-missing
 ```
-Notes: SQLite via `DATABASE_URL` override in `tests/conftest.py`; ASGITransport runs app in-process; lifecycle via `asgi-lifespan`. CI runs `uv run pytest tests/api` before deploy (see `.github/workflows/deploy.yml`).
+Notes: Project root is on `sys.path` / `[tool.pytest.ini_options] pythonpath` so `app` imports during collection. SQLite via `DATABASE_URL` in `tests/conftest.py`; ASGITransport runs the app in-process; lifecycle via `asgi-lifespan`. **`[tool.coverage.run]`** enables `concurrency = ["greenlet", "thread"]` so Coverage.py tracks Litestar handlers after SQLAlchemy async awaits (without this, route code looks uncovered). CI verifies the gameStore bundle (`scripts/build_gamestore.py --check`) then runs pytest on `tests/api`, `tests/army_forge`, `tests/static`, and selected root tests (see `.github/workflows/deploy.yml`).
 
 Test coverage includes:
 - Unit action logging (rush, advance, hold, charge, attack)
@@ -115,6 +117,8 @@ Test coverage includes:
 - Spell casting (success/failure recording, token deduction, insufficient tokens, non-caster rejection)
 - Effective caster detection (`get_effective_caster` unit tests: DB flags, rules-derived, minimum level clamping)
 - Stat modification parsing (`parse_stat_modifications`: rule-name-gated rating extraction)
+- Army Forge `extract_list_id` / `parse_special_rules` (no HTTP)
+- `gameStore.js` matches concatenated parts (`tests/static/test_gamestore_bundle.py`)
 
 ### End-to-End (Playwright)
 Requires server at `http://localhost:8000`.

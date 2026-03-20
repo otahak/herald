@@ -4,6 +4,11 @@ import sys
 from pathlib import Path
 from typing import AsyncIterator
 
+# Project root on path so `app` (and test collection) work without relying on fixture order.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -28,7 +33,6 @@ def app(test_db_url: str):
     # Ensure env is set before importing the app
     os.environ["DATABASE_URL"] = test_db_url
     os.environ["APP_DEBUG"] = "true"
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
     from app.main import app as litestar_app
     return litestar_app
 
