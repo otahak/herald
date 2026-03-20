@@ -151,8 +151,11 @@ def _weapon_to_loadout_item(w: dict) -> dict:
     }
 
 
-def _share_unit_to_tts(share_unit: dict, book_unit: dict) -> dict:
-    """Convert share API unit + army book unit to TTS-style unit dict."""
+def _share_unit_to_tts(share_unit: dict, book_unit: dict | None) -> dict:
+    """Convert share API unit + army book unit to TTS-style unit dict.
+    If book_unit is None (army book unavailable), return a placeholder unit."""
+    if book_unit is None:
+        return _share_unit_to_tts_placeholder(share_unit)
     loadout = []
     for w in book_unit.get("weapons") or []:
         loadout.append(_weapon_to_loadout_item(w))
@@ -174,6 +177,27 @@ def _share_unit_to_tts(share_unit: dict, book_unit: dict) -> dict:
         "cost": book_unit.get("cost", 0),
         "loadout": loadout,
         "rules": rules,
+        "selectedUpgrades": share_unit.get("selectedUpgrades") or [],
+        "joinToUnit": share_unit.get("joinToUnit"),
+        "combined": share_unit.get("combined", False),
+    }
+
+
+def _share_unit_to_tts_placeholder(share_unit: dict) -> dict:
+    """Create a minimal TTS-style unit when army book is unavailable (e.g. list/army private in Army Forge Studio)."""
+    name = share_unit.get("customName") or "Unit (army book unavailable)"
+    return {
+        "id": share_unit.get("id"),
+        "selectionId": share_unit.get("selectionId", share_unit.get("id")),
+        "armyId": share_unit.get("armyId"),
+        "name": name,
+        "customName": None,  # Already used as name
+        "quality": 4,
+        "defense": 4,
+        "size": 1,
+        "cost": 0,
+        "loadout": [],
+        "rules": [],
         "selectedUpgrades": share_unit.get("selectedUpgrades") or [],
         "joinToUnit": share_unit.get("joinToUnit"),
         "combined": share_unit.get("combined", False),
@@ -390,8 +414,8 @@ class ProxyController(Controller):
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
                     raise ValidationException(
-                        "Army Forge's export API doesn't support this list (e.g. combined armies like The Ashen Pact, "
-                        "or custom/community books). Use a single-army official list or add units manually."
+                        "Army Forge returned an error for this list. If it uses custom or Studio army books, "
+                        "check that the list and army are set to public in Army Forge Studio. Otherwise add units manually."
                     )
                 raise ValidationException(f"Army Forge API error: {e.response.status_code}")
             except httpx.TimeoutException as e:
@@ -479,7 +503,7 @@ class ProxyController(Controller):
                 if e.response.status_code == 404:
                     raise NotFoundException(f"Army list '{list_id}' not found on Army Forge")
                 elif e.response.status_code == 500:
-                    # TTS API failed (combined armies, custom books, etc). Try share API fallback.
+                    # TTS API failed (e.g. combined armies). Try share API fallback.
                     logger.info(f"TTS API returned 500, trying share API fallback for {list_id}")
                     try:
                         share_resp = await client.get(
@@ -491,9 +515,8 @@ class ProxyController(Controller):
                     except Exception as share_err:
                         logger.warning(f"Share API fallback failed: {share_err}")
                         raise ValidationException(
-                            "Army Forge's export API returned an error for this list. "
-                            "This often affects combined-army lists (e.g. The Ashen Pact), custom/community army books, "
-                            "or lists Army Forge's TTS export doesn't support. Add units manually or try a single-army list."
+                            "Army Forge returned an error for this list. Check that the list and any custom or "
+                            "Studio army books are set to public in Army Forge Studio. Otherwise add units manually."
                         )
                     # Convert share data to TTS-like format via army books
                     game_system = share_data.get("gameSystem", "gf")
@@ -521,10 +544,9 @@ class ProxyController(Controller):
                         aid = su.get("armyId")
                         uid = su.get("id")
                         book_unit = book_units_by_id.get((aid, uid)) if aid and uid else None
-                        if book_unit:
-                            tts_units.append(_share_unit_to_tts(su, book_unit))
-                        else:
-                            logger.warning(f"Could not resolve unit {uid} from army {aid}, skipping")
+                        if book_unit is None and (aid or uid):
+                            logger.info(f"Army book unavailable for unit {uid} (army {aid}), using placeholder (list/army may be private)")
+                        tts_units.append(_share_unit_to_tts(su, book_unit))
                     army_data = {
                         "gameSystem": game_system,
                         "units": tts_units,
@@ -705,15 +727,19 @@ class ProxyController(Controller):
         player.army_forge_list_id = list_id
 
         # Fetch army book for spells, faction rules, and metadata
-        army_id = None
-        game_system = army_data.get("gameSystem")
-        for u in units_data:
-            if isinstance(u, dict) and u.get("armyId"):
-                army_id = u["armyId"]
-                break
-
+        # Try each unit's armyId until we get a successful fetch (first may be unavailable custom book)
         army_book: dict = {}
-        if army_id and game_system:
+        game_system = army_data.get("gameSystem")
+        seen_army_ids: set[str] = set()
+        for u in units_data:
+            if not isinstance(u, dict):
+                continue
+            army_id = u.get("armyId")
+            if not army_id or army_id in seen_army_ids:
+                continue
+            seen_army_ids.add(army_id)
+            if not game_system:
+                continue
             try:
                 async with httpx.AsyncClient() as book_client:
                     book_resp = await book_client.get(
@@ -728,6 +754,7 @@ class ProxyController(Controller):
                         f"{len(army_book.get('spells', []))} spells, "
                         f"{len(army_book.get('specialRules', []))} rules"
                     )
+                    break  # Use first successful fetch
             except Exception as e:
                 logger.warning(f"Could not fetch army book for {army_id}: {e}")
 
