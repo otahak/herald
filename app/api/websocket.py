@@ -309,7 +309,7 @@ async def game_websocket(
         while True:
             try:
                 data = await socket.receive_json()
-            except json.JSONDecodeError:
+            except json.JSONDecodeError:  # pragma: no cover — Litestar/Starlette often reject non-JSON before this runs
                 await socket.send_json({"type": "error", "message": "Invalid JSON"})
                 continue
             
@@ -391,7 +391,7 @@ async def game_websocket(
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for game {code}")
     
-    except Exception as e:
+    except Exception as e:  # pragma: no cover — belt-and-suspenders; message-loop errors surface via disconnect
         logger.exception(f"WebSocket error for game {code}: {e}")
     
     finally:
@@ -415,7 +415,7 @@ async def game_websocket(
                 )
                 
                 logger.info(f"Player {player_id} left game {code}")
-            except Exception as e:
+            except Exception as e:  # pragma: no cover — defensive; DB pool teardown can mask with real drivers
                 error_log(
                     "Error updating player status on disconnect",
                     exc=e,

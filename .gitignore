@@ -1,4 +1,5 @@
 # Python / venv
+lib/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -42,6 +43,9 @@ Thumbs.db
 # Optional build artifacts (keep if you start bundling)
 dist/
 build/
+
+# Debug scripts (untracked)
+scripts/
 
 # Keep this file tracked
 !.gitignore

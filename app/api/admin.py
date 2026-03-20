@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from litestar import Controller, get, patch, delete
@@ -209,14 +209,14 @@ class AdminController(Controller):
             unread_feedback = unread_feedback_result.scalar() or 0
             
             # Games created in last 24 hours
-            day_ago = datetime.utcnow() - timedelta(days=1)
+            day_ago = datetime.now(timezone.utc) - timedelta(days=1)
             games_24h_result = await session.execute(
                 select(func.count(Game.id)).where(Game.created_at >= day_ago)
             )
             games_last_24h = games_24h_result.scalar() or 0
             
             # Games created in last 7 days
-            week_ago = datetime.utcnow() - timedelta(days=7)
+            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
             games_7d_result = await session.execute(
                 select(func.count(Game.id)).where(Game.created_at >= week_ago)
             )

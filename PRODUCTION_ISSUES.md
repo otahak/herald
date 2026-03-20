@@ -3,7 +3,7 @@
 ## Critical Issues
 
 ### 1. Clear Events Endpoint - Missing Authorization & Activity Tracking ✅ FIXED
-**Location**: `app/api/games.py:1678-1718`
+**Location**: `app/api/games/events.py` (`clear_events`)
 **Status**: Activity tracking added
 **Remaining**: 
 - No authorization check - anyone with game code can clear events (low priority - game codes are effectively access tokens)
@@ -27,7 +27,7 @@
 ## Medium Priority Issues
 
 ### 4. Missing Error Handling for Empty target_names
-**Location**: `app/api/games.py:1432-1434`
+**Location**: `app/api/games/units_combat.py` (unit action / target name handling)
 **Issue**: If `target_names` is empty (shouldn't happen due to validation, but defensive), `", ".join([])` returns empty string
 **Current**: Works but could be clearer
 **Status**: Actually safe - empty join returns empty string, which is fine
@@ -37,7 +37,7 @@
 **Status**: Replaced all `alert()` with toast notifications (error/success/info). Toasts auto-dismiss after 5s and can be dismissed manually.
 
 ### 6. No Rate Limiting on Clear Events ✅ FIXED
-**Location**: `app/api/games.py`, `app/utils/rate_limit.py`
+**Location**: `app/api/games/` (import/clear-events handlers), `app/utils/rate_limit.py`
 **Status**: Rate limiting added: clear_events (5/min per game), import_army (10/min per game). Returns 429 when exceeded.
 
 ### 7. Missing Null Check in getAttachedHeroesForUnit
@@ -46,7 +46,7 @@
 **Status**: Actually safe - returns empty array if unitId is falsy
 
 ### 8. WebSocket Broadcast After Clear Events
-**Location**: `app/api/games.py:1694-1700`
+**Location**: `app/api/games/events.py` (post–clear-events broadcast)
 **Issue**: Broadcasts to all players, but they may not refresh events automatically
 **Recommendation**: Ensure frontend listens for `events_cleared` reason and refreshes
 

@@ -4,7 +4,7 @@ from app.game.routes import routes as routes_game
 from app.feedback.routes import routes as routes_feedback
 from app.help.routes import routes as routes_help
 from app.admin.routes import routes as routes_admin
-from app.api import GamesController, ProxyController, FeedbackController, AdminController, websocket_handler
+from app.api import GAMES_ROUTE_HANDLERS, ProxyController, FeedbackController, AdminController, websocket_handler
 from litestar.static_files import create_static_files_router
 
 ROUTES = [
@@ -14,7 +14,7 @@ ROUTES = [
     *routes_feedback,
     *routes_help,
     *routes_admin,
-    GamesController,
+    *GAMES_ROUTE_HANDLERS,
     ProxyController,
     FeedbackController,
     AdminController,
