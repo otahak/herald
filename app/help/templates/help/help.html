@@ -115,14 +115,8 @@
                 <div>
                     <strong>Combined / multi-army lists (e.g. The Ashen Pact):</strong> Herald uses a fallback
                     when Army Forge's TTS export fails—it fetches the list via the share API and army books.
-                    Many combined and custom lists import successfully.
-                </div>
-            </div>
-            <div class="alert alert-warning text-xs mt-2">
-                <div>
-                    <strong>Third-party / custom content:</strong> Not all third-party or community army books
-                    are supported. Herald can only import lists whose army books are publicly accessible via
-                    Army Forge's API. Private or unlisted books may fail—use manual entry for those units.
+                    If import fails, check that the list and any custom or Studio army books are set to
+                    <strong>public</strong> in Army Forge Studio.
                 </div>
             </div>
         </div>
@@ -363,10 +357,10 @@
                 </div>
                 <div class="collapse-content text-sm">
                     <p>
-                        Spells are fetched from the Army Forge army book API. Make sure you're
-                        using a standard (non-custom) faction. If the problem persists,
-                        try re-importing the list. Spells appear in the collapsible
-                        <em>Spells</em> section under each player.
+                        Spells are fetched from the Army Forge army book API. Make sure the list
+                        and any custom or Studio army books are set to public in Army Forge Studio.
+                        If the problem persists, try re-importing the list. Spells appear in the
+                        collapsible <em>Spells</em> section under each player.
                     </p>
                 </div>
             </div>
